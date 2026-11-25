@@ -24,7 +24,12 @@ import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.FirebaseFirestoreException
 import com.google.firebase.firestore.SetOptions
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.launch
+import com.google.firebase.firestore.DocumentReference
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.tasks.await
@@ -38,6 +43,8 @@ object Repo {
     private val auth: FirebaseAuth get() = FirebaseAuth.getInstance()
     private val db: FirebaseFirestore get() = FirebaseFirestore.getInstance()
     private lateinit var local: SharedPreferences
+    /** Para tarefas que devem terminar mesmo se a pessoa sair da tela. */
+    private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     fun init(context: Context) {
         local = context.getSharedPreferences("vamoviajar", Context.MODE_PRIVATE)
@@ -214,19 +221,34 @@ object Repo {
             .addOnFailureListener { Log.e(TAG, "Erro ao editar viagem", it) }
     }
 
-    /** Apaga a viagem, o convite e todas as atividades do roteiro. */
+    /** Apaga a viagem, o convite, o roteiro e os checklists que a pessoa consegue ver. */
     fun deleteTrip(trip: Trip) {
+        val uid = auth.currentUser?.uid ?: return
         val tripRef = db.collection("trips").document(trip.id)
-        tripRef.collection("activities").get()
-            .continueWithTask { task ->
-                val batch = db.batch()
-                val docs = if (task.isSuccessful) task.result?.documents.orEmpty() else emptyList()
-                docs.take(450).forEach { batch.delete(it.reference) }
-                if (trip.inviteCode.isNotBlank()) batch.delete(db.collection("invites").document(trip.inviteCode))
-                batch.delete(tripRef)
-                batch.commit()
+        appScope.launch {
+            try {
+                val refs = mutableListOf<DocumentReference>()
+                refs += tripRef.collection("activities").get().await().documents.map { it.reference }
+                val lists = tripRef.collection("checklists").whereEqualTo("personal", false).get().await().documents +
+                    tripRef.collection("checklists").whereEqualTo("ownerId", uid).get().await().documents
+                lists.distinctBy { it.id }.forEach { list ->
+                    refs += list.reference.collection("items").get().await().documents.map { it.reference }
+                    refs += list.reference
+                }
+                // Lotes de até 400 para ficar abaixo do limite do Firestore
+                refs.chunked(400).forEach { chunk ->
+                    val batch = db.batch()
+                    chunk.forEach { batch.delete(it) }
+                    batch.commit().await()
+                }
+                val last = db.batch()
+                if (trip.inviteCode.isNotBlank()) last.delete(db.collection("invites").document(trip.inviteCode))
+                last.delete(tripRef)
+                last.commit().await()
+            } catch (e: Exception) {
+                Log.e(TAG, "Erro ao apagar viagem", e)
             }
-            .addOnFailureListener { Log.e(TAG, "Erro ao apagar viagem", it) }
+        }
     }
 
     /** Entra numa viagem pelo código. Retorna o id da viagem. */
@@ -318,6 +340,129 @@ object Repo {
         val batch = db.batch()
         ids.forEach { batch.update(activitiesRef(tripId).document(it), "order", FieldValue.delete()) }
         batch.commit().addOnFailureListener { Log.e(TAG, "Erro ao limpar ordem", it) }
+    }
+
+    // ---------- Checklist ----------
+
+    private fun listsRef(tripId: String) =
+        db.collection("trips").document(tripId).collection("checklists")
+
+    private fun itemsRef(tripId: String, listId: String) =
+        listsRef(tripId).document(listId).collection("items")
+
+    /** Listas do grupo + listas pessoais de quem está usando. */
+    fun checklists(tripId: String): Flow<List<Checklist>> = callbackFlow {
+        val uid = auth.currentUser?.uid.orEmpty()
+        var shared: List<Checklist>? = null
+        var mine: List<Checklist>? = null
+        fun emit() {
+            val s = shared ?: return
+            val m = mine ?: return
+            trySend((s + m).distinctBy { it.id }.sortedBy { it.createdAtMs })
+        }
+        val r1 = listsRef(tripId).whereEqualTo("personal", false).addSnapshotListener { snap, err ->
+            if (err != null) Log.e(TAG, "Erro ao ler listas", err)
+            if (snap != null) { shared = snap.documents.mapNotNull { it.toChecklist() }; emit() }
+        }
+        val r2 = listsRef(tripId).whereEqualTo("ownerId", uid).addSnapshotListener { snap, err ->
+            if (err != null) Log.e(TAG, "Erro ao ler listas pessoais", err)
+            if (snap != null) { mine = snap.documents.mapNotNull { it.toChecklist() }; emit() }
+        }
+        awaitClose { r1.remove(); r2.remove() }
+    }
+
+    fun checklist(tripId: String, listId: String): Flow<Checklist?> = callbackFlow {
+        val reg = listsRef(tripId).document(listId).addSnapshotListener { snap, _ -> trySend(snap?.toChecklist()) }
+        awaitClose { reg.remove() }
+    }
+
+    fun items(tripId: String, listId: String): Flow<List<CheckItem>> = callbackFlow {
+        val reg = itemsRef(tripId, listId).addSnapshotListener { snap, err ->
+            if (err != null) Log.e(TAG, "Erro ao ler itens", err)
+            if (snap != null) trySend(snap.documents.mapNotNull { it.toCheckItem() })
+        }
+        awaitClose { reg.remove() }
+    }
+
+    /** Cria a lista já com os itens do modelo. Retorna o id. */
+    fun createChecklist(tripId: String, name: String, personal: Boolean, templateItems: List<String>): String {
+        val uid = auth.currentUser?.uid ?: throw UserMessageException("Faça login de novo.")
+        val ref = listsRef(tripId).document()
+        val now = System.currentTimeMillis()
+        val batch = db.batch()
+        batch.set(
+            ref, mapOf(
+                "name" to name.trim(),
+                "personal" to personal,
+                "ownerId" to if (personal) uid else "",
+                "createdAtMs" to now,
+            )
+        )
+        templateItems.forEachIndexed { i, text ->
+            batch.set(ref.collection("items").document(), newItemData(text, now + i))
+        }
+        batch.commit().addOnFailureListener { Log.e(TAG, "Erro ao criar lista", it) }
+        return ref.id
+    }
+
+    fun renameChecklist(tripId: String, listId: String, name: String) {
+        listsRef(tripId).document(listId).update("name", name.trim())
+            .addOnFailureListener { Log.e(TAG, "Erro ao renomear lista", it) }
+    }
+
+    fun deleteChecklist(tripId: String, listId: String) {
+        val listRef = listsRef(tripId).document(listId)
+        appScope.launch {
+            try {
+                val items = listRef.collection("items").get().await().documents.map { it.reference }
+                (items + listRef).chunked(400).forEach { chunk ->
+                    val batch = db.batch()
+                    chunk.forEach { batch.delete(it) }
+                    batch.commit().await()
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Erro ao apagar lista", e)
+            }
+        }
+    }
+
+    private fun newItemData(text: String, createdAtMs: Long) = mapOf(
+        "text" to text.trim(),
+        "done" to false,
+        "doneByName" to "",
+        "assigneeId" to "",
+        "assigneeName" to "",
+        "createdAtMs" to createdAtMs,
+    )
+
+    fun addItem(tripId: String, listId: String, text: String) {
+        itemsRef(tripId, listId).add(newItemData(text, System.currentTimeMillis()))
+            .addOnFailureListener { Log.e(TAG, "Erro ao adicionar item", it) }
+    }
+
+    fun setItemDone(tripId: String, listId: String, itemId: String, done: Boolean) {
+        itemsRef(tripId, listId).document(itemId)
+            .update(mapOf("done" to done, "doneByName" to if (done) displayName() else ""))
+            .addOnFailureListener { Log.e(TAG, "Erro ao marcar item", it) }
+    }
+
+    fun updateItem(tripId: String, listId: String, itemId: String, text: String, assigneeId: String, assigneeName: String) {
+        itemsRef(tripId, listId).document(itemId)
+            .update(mapOf("text" to text.trim(), "assigneeId" to assigneeId, "assigneeName" to assigneeName))
+            .addOnFailureListener { Log.e(TAG, "Erro ao editar item", it) }
+    }
+
+    fun deleteItem(tripId: String, listId: String, itemId: String) {
+        itemsRef(tripId, listId).document(itemId).delete()
+            .addOnFailureListener { Log.e(TAG, "Erro ao apagar item", it) }
+    }
+
+    fun uncheckAll(tripId: String, listId: String, itemIds: List<String>) {
+        itemIds.chunked(400).forEach { chunk ->
+            val batch = db.batch()
+            chunk.forEach { batch.update(itemsRef(tripId, listId).document(it), mapOf("done" to false, "doneByName" to "")) }
+            batch.commit().addOnFailureListener { Log.e(TAG, "Erro ao desmarcar", it) }
+        }
     }
 
     private fun newInviteCode(): String {

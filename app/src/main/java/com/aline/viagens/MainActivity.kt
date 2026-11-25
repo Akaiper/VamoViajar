@@ -15,6 +15,8 @@ import androidx.navigation.compose.rememberNavController
 import com.aline.viagens.data.Repo
 import com.aline.viagens.data.UserPrefs
 import com.aline.viagens.ui.ActivityFormScreen
+import com.aline.viagens.ui.ChecklistScreen
+import com.aline.viagens.ui.ChecklistsScreen
 import com.aline.viagens.ui.ItineraryScreen
 import com.aline.viagens.ui.LoginScreen
 import com.aline.viagens.ui.SettingsScreen
@@ -70,6 +72,22 @@ private fun MainNav(uid: String, prefs: UserPrefs) {
                 onBack = { nav.backFrom("trip/") },
                 onEdit = { nav.navigate("edit/$id") },
                 onItinerary = { nav.navigate("roteiro/$id") },
+                onChecklist = { nav.navigate("checklist/$id") },
+            )
+        }
+        composable("checklist/{id}") { entry ->
+            val id = entry.arguments?.getString("id").orEmpty()
+            ChecklistsScreen(
+                tripId = id,
+                onBack = { nav.backFrom("checklist/") },
+                onOpen = { listId -> nav.navigate("lista/$id/$listId") },
+            )
+        }
+        composable("lista/{tripId}/{listId}") { entry ->
+            ChecklistScreen(
+                tripId = entry.arguments?.getString("tripId").orEmpty(),
+                listId = entry.arguments?.getString("listId").orEmpty(),
+                onBack = { nav.backFrom("lista/") },
             )
         }
         composable("roteiro/{id}") { entry ->

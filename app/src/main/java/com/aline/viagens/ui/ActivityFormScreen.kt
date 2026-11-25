@@ -187,10 +187,13 @@ fun ActivityFormScreen(
                 value = place, onValueChange = { place = it },
                 label = { Text("Local (opcional)") },
                 placeholder = { Text("Nome, endereço ou link do Maps") },
+                supportingText = {
+                    Text("Para o lugar exato: no Google Maps, toque em Compartilhar → Copiar link e cole aqui.")
+                },
                 singleLine = true,
                 trailingIcon = {
                     if (place.isNotBlank()) {
-                        IconButton(onClick = { openInMaps(context, place) }) { Icon(Icons.Outlined.Map, "Ver no mapa") }
+                        IconButton(onClick = { openInMaps(context, place, trip?.destination.orEmpty()) }) { Icon(Icons.Outlined.Map, "Ver no mapa") }
                     }
                 },
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),

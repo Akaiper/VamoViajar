@@ -62,15 +62,23 @@ import com.aline.viagens.data.Repo
 import com.aline.viagens.data.TripState
 import com.aline.viagens.data.sortedForDay
 
-/** Abre um local no Google Maps (ou no app de mapas que a pessoa tiver). Aceita nome, endereço ou link. */
-fun openInMaps(context: Context, place: String) {
+/**
+ * Abre um local no Google Maps. Aceita nome, endereço ou link.
+ * Junta o destino da viagem na busca, para o Maps procurar perto de lá e não perto de onde a pessoa está.
+ */
+fun openInMaps(context: Context, place: String, destination: String = "") {
     val p = place.trim()
-    val uri = if (p.startsWith("http")) Uri.parse(p) else Uri.parse("geo:0,0?q=" + Uri.encode(p))
+    if (p.startsWith("http")) {
+        runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(p))) }
+        return
+    }
+    val dest = destination.trim()
+    val query = if (dest.isBlank() || p.contains(dest, ignoreCase = true)) p else "$p, $dest"
+    val uri = Uri.parse("https://www.google.com/maps/search/?api=1&query=" + Uri.encode(query))
     try {
         context.startActivity(Intent(Intent.ACTION_VIEW, uri))
     } catch (e: ActivityNotFoundException) {
-        val web = Uri.parse("https://www.google.com/maps/search/?api=1&query=" + Uri.encode(p))
-        runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, web)) }
+        // Sem navegador nem Maps: não tem o que abrir
     }
 }
 
@@ -134,6 +142,7 @@ fun ItineraryScreen(
                 val dayList = byDay[dayId].orEmpty().sortedForDay()
                 daySection(
                     key = dayId,
+                    destination = trip.destination,
                     title = "Dia ${index + 1}",
                     subtitle = Days.label(date),
                     activities = dayList,
@@ -168,7 +177,7 @@ fun ItineraryScreen(
             if (ideas.isEmpty()) {
                 item(key = "ideas-empty") { EmptyHint("Nenhuma ideia ainda. Toque no + para anotar uma.") }
             } else {
-                itemsIndexed(ideas, key = { _, a -> a.id }) { _, a -> ActivityCard(a, onClick = { onOpen(a.id) }) }
+                itemsIndexed(ideas, key = { _, a -> a.id }) { _, a -> ActivityCard(a, trip.destination, onClick = { onOpen(a.id) }) }
             }
 
             if (outside.isNotEmpty()) {
@@ -180,7 +189,7 @@ fun ItineraryScreen(
                         modifier = Modifier.padding(top = 16.dp),
                     )
                 }
-                itemsIndexed(outside, key = { _, a -> a.id }) { _, a -> ActivityCard(a, showDay = true, onClick = { onOpen(a.id) }) }
+                itemsIndexed(outside, key = { _, a -> a.id }) { _, a -> ActivityCard(a, trip.destination, showDay = true, onClick = { onOpen(a.id) }) }
             }
         }
     }
@@ -188,6 +197,7 @@ fun ItineraryScreen(
 
 private fun LazyListScope.daySection(
     key: String,
+    destination: String,
     title: String,
     subtitle: String,
     activities: List<Activity>,
@@ -226,6 +236,7 @@ private fun LazyListScope.daySection(
         itemsIndexed(activities, key = { _, a -> a.id }) { i, a ->
             ActivityCard(
                 activity = a,
+                destination = destination,
                 onClick = { if (!reordering) onOpen(a.id) },
                 reorderControls = if (reordering) {
                     {
@@ -279,6 +290,7 @@ private fun EmptyHint(text: String) {
 @Composable
 private fun ActivityCard(
     activity: Activity,
+    destination: String,
     showDay: Boolean = false,
     onClick: () -> Unit,
     reorderControls: (@Composable () -> Unit)? = null,
@@ -326,7 +338,7 @@ private fun ActivityCard(
                 if (activity.place.isNotBlank() && reorderControls == null) {
                     Spacer(Modifier.height(6.dp))
                     AssistChip(
-                        onClick = { openInMaps(context, activity.place) },
+                        onClick = { openInMaps(context, activity.place, destination) },
                         label = { Text(activity.place, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                         leadingIcon = { Icon(Icons.Outlined.Map, null, Modifier.size(18.dp)) },
                     )

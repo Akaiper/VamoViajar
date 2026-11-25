@@ -82,9 +82,11 @@ fun TripDetailScreen(
     onBack: () -> Unit,
     onEdit: () -> Unit,
     onItinerary: () -> Unit,
+    onChecklist: () -> Unit,
 ) {
     val state by remember(tripId) { Repo.trip(tripId) }.collectAsStateWithLifecycle(initialValue = TripState.Loading)
     val activities by remember(tripId) { Repo.activities(tripId) }.collectAsStateWithLifecycle(initialValue = emptyList())
+    val checklists by remember(tripId) { Repo.checklists(tripId) }.collectAsStateWithLifecycle(initialValue = emptyList())
     var menuOpen by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
     var deleting by remember { mutableStateOf(false) }
@@ -133,7 +135,33 @@ fun TripDetailScreen(
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
                 item { Overview(trip) }
-                item { ItineraryEntry(activities.count { it.day.isNotBlank() }, activities.count { it.day.isBlank() }, onItinerary) }
+                item {
+                    val planned = activities.count { it.day.isNotBlank() }
+                    val ideas = activities.count { it.day.isBlank() }
+                    FeatureEntry(
+                        icon = Icons.Outlined.Map,
+                        title = "Roteiro dia a dia",
+                        subtitle = if (planned == 0 && ideas == 0) "Comece a planejar o que fazer em cada dia"
+                        else listOfNotNull(
+                            planned.takeIf { it > 0 }?.let { if (it == 1) "1 atividade" else "$it atividades" },
+                            ideas.takeIf { it > 0 }?.let { if (it == 1) "1 ideia sem dia" else "$it ideias sem dia" },
+                        ).joinToString(" · "),
+                        onClick = onItinerary,
+                    )
+                }
+                item {
+                    val n = checklists.size
+                    FeatureEntry(
+                        icon = Icons.Outlined.Checklist,
+                        title = "Checklist",
+                        subtitle = when (n) {
+                            0 -> "Mala, documentos e o que resolver antes de ir"
+                            1 -> "1 lista"
+                            else -> "$n listas"
+                        },
+                        onClick = onChecklist,
+                    )
+                }
                 item { InviteCard(trip, snackbar) }
                 item { People(trip) }
                 item { ComingSoon() }
@@ -301,7 +329,7 @@ private fun People(trip: Trip) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ItineraryEntry(planned: Int, ideas: Int, onClick: () -> Unit) {
+private fun FeatureEntry(icon: ImageVector, title: String, subtitle: String, onClick: () -> Unit) {
     Card(
         onClick = onClick,
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLowest),
@@ -310,23 +338,13 @@ private fun ItineraryEntry(planned: Int, ideas: Int, onClick: () -> Unit) {
         Row(Modifier.padding(20.dp), verticalAlignment = Alignment.CenterVertically) {
             Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primary, modifier = Modifier.size(44.dp)) {
                 Box(contentAlignment = Alignment.Center) {
-                    Icon(Icons.Outlined.Map, null, tint = MaterialTheme.colorScheme.onPrimary)
+                    Icon(icon, null, tint = MaterialTheme.colorScheme.onPrimary)
                 }
             }
             Spacer(Modifier.width(16.dp))
             Column(Modifier.weight(1f)) {
-                Text("Roteiro dia a dia", style = MaterialTheme.typography.titleMedium)
-                Text(
-                    when {
-                        planned == 0 && ideas == 0 -> "Comece a planejar o que fazer em cada dia"
-                        else -> listOfNotNull(
-                            planned.takeIf { it > 0 }?.let { if (it == 1) "1 atividade" else "$it atividades" },
-                            ideas.takeIf { it > 0 }?.let { if (it == 1) "1 ideia sem dia" else "$it ideias sem dia" },
-                        ).joinToString(" · ")
-                    },
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                Text(title, style = MaterialTheme.typography.titleMedium)
+                Text(subtitle, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
         }
@@ -338,7 +356,6 @@ private fun ComingSoon() {
     Column {
         SectionTitle("Em breve", Modifier.padding(bottom = 8.dp))
         val items = listOf(
-            Icons.Outlined.Checklist to "Checklist",
             Icons.Outlined.ConfirmationNumber to "Reservas",
             Icons.Outlined.Payments to "Gastos e divisão",
         )

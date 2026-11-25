@@ -76,3 +76,81 @@ fun List<Activity>.sortedForDay(): List<Activity> {
         sortedWith(compareBy<Activity> { it.order ?: Double.MAX_VALUE }.then(byTime))
     } else sortedWith(byTime)
 }
+
+/** Uma lista do checklist. personal = só quem criou vê. */
+data class Checklist(
+    val id: String,
+    val name: String,
+    val personal: Boolean,
+    val ownerId: String,
+    val createdAtMs: Long,
+)
+
+data class CheckItem(
+    val id: String,
+    val text: String,
+    val done: Boolean,
+    val doneByName: String,
+    val assigneeId: String,
+    val assigneeName: String,
+    val createdAtMs: Long,
+)
+
+fun DocumentSnapshot.toChecklist(): Checklist? {
+    if (!exists()) return null
+    return Checklist(
+        id = id,
+        name = getString("name").orEmpty(),
+        personal = getBoolean("personal") ?: false,
+        ownerId = getString("ownerId").orEmpty(),
+        createdAtMs = getLong("createdAtMs") ?: 0L,
+    )
+}
+
+fun DocumentSnapshot.toCheckItem(): CheckItem? {
+    if (!exists()) return null
+    return CheckItem(
+        id = id,
+        text = getString("text").orEmpty(),
+        done = getBoolean("done") ?: false,
+        doneByName = getString("doneByName").orEmpty(),
+        assigneeId = getString("assigneeId").orEmpty(),
+        assigneeName = getString("assigneeName").orEmpty(),
+        createdAtMs = getLong("createdAtMs") ?: 0L,
+    )
+}
+
+/** Pendentes primeiro, na ordem em que foram adicionados; feitos no fim. */
+fun List<CheckItem>.sortedForList(): List<CheckItem> =
+    sortedWith(compareBy<CheckItem>({ it.done }, { it.createdAtMs }))
+
+/** Modelos de lista com itens sugeridos. */
+enum class ChecklistTemplate(val label: String, val items: List<String>) {
+    VAZIA("Vazia", emptyList()),
+    MALA(
+        "Mala", listOf(
+            "Roupas para os dias da viagem", "Roupa íntima e meias", "Pijama", "Calçado confortável",
+            "Itens de higiene", "Remédios de uso pessoal", "Carregador do celular", "Carregador portátil",
+            "Fones de ouvido", "Óculos de sol", "Protetor solar",
+        )
+    ),
+    DOCUMENTOS(
+        "Documentos", listOf(
+            "RG ou CNH", "Passaporte (se for internacional)", "Cartões de crédito e débito",
+            "Comprovantes das reservas", "Seguro viagem", "Carteira de vacinação (se exigida)", "Um pouco de dinheiro em espécie",
+        )
+    ),
+    ANTES(
+        "Antes de viajar", listOf(
+            "Confirmar as reservas", "Fazer check-in online", "Avisar o banco sobre a viagem", "Baixar mapas offline",
+            "Combinar quem cuida das plantas e dos pets", "Tirar o lixo", "Desligar aparelhos da tomada",
+            "Combinar o transporte até o aeroporto ou rodoviária",
+        )
+    ),
+    PRAIA(
+        "Praia", listOf(
+            "Roupa de banho", "Toalha de praia", "Chinelo", "Protetor solar", "Boné ou chapéu",
+            "Saída de praia", "Bolsa à prova d'água para o celular",
+        )
+    ),
+}
