@@ -40,3 +40,39 @@ fun DocumentSnapshot.toTrip(): Trip? {
         inviteCode = getString("inviteCode").orEmpty(),
     )
 }
+
+/** Uma atividade do roteiro. day vazio = "ideia sem dia". */
+data class Activity(
+    val id: String = "",
+    val title: String = "",
+    val day: String = "",   // yyyy-MM-dd, ou vazio
+    val time: String = "",  // HH:mm, ou vazio
+    val place: String = "",
+    val notes: String = "",
+    val category: String = "passeio",
+    val order: Double? = null, // preenchido só quando o dia foi reordenado na mão
+    val createdByName: String = "",
+)
+
+fun DocumentSnapshot.toActivity(): Activity? {
+    if (!exists()) return null
+    return Activity(
+        id = id,
+        title = getString("title").orEmpty(),
+        day = getString("day").orEmpty(),
+        time = getString("time").orEmpty(),
+        place = getString("place").orEmpty(),
+        notes = getString("notes").orEmpty(),
+        category = getString("category") ?: "passeio",
+        order = getDouble("order"),
+        createdByName = getString("createdByName").orEmpty(),
+    )
+}
+
+/** Ordem de um dia: se alguém reordenou na mão, usa essa ordem; senão, pelo horário (sem horário vai pro fim). */
+fun List<Activity>.sortedForDay(): List<Activity> {
+    val byTime = compareBy<Activity>({ it.time.isBlank() }, { it.time }, { it.title.lowercase() })
+    return if (any { it.order != null }) {
+        sortedWith(compareBy<Activity> { it.order ?: Double.MAX_VALUE }.then(byTime))
+    } else sortedWith(byTime)
+}

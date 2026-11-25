@@ -13,8 +13,10 @@ android {
         applicationId = "com.aline.viagens"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        // O número do build do GitHub vira a versão, igual ao nome da Release (v0.1.N)
+        val runNumber = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 1
+        versionCode = runNumber
+        versionName = "0.1.$runNumber"
     }
 
     signingConfigs {

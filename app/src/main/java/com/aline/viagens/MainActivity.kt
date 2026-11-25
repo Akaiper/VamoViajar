@@ -14,6 +14,8 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.aline.viagens.data.Repo
 import com.aline.viagens.data.UserPrefs
+import com.aline.viagens.ui.ActivityFormScreen
+import com.aline.viagens.ui.ItineraryScreen
 import com.aline.viagens.ui.LoginScreen
 import com.aline.viagens.ui.SettingsScreen
 import com.aline.viagens.ui.TripDetailScreen
@@ -67,6 +69,28 @@ private fun MainNav(uid: String, prefs: UserPrefs) {
                 uid = uid,
                 onBack = { nav.backFrom("trip/") },
                 onEdit = { nav.navigate("edit/$id") },
+                onItinerary = { nav.navigate("roteiro/$id") },
+            )
+        }
+        composable("roteiro/{id}") { entry ->
+            val id = entry.arguments?.getString("id").orEmpty()
+            ItineraryScreen(
+                tripId = id,
+                onBack = { nav.backFrom("roteiro/") },
+                // "-" representa "sem dia" na rota
+                onAdd = { day -> nav.navigate("atividade/$id/novo/${day.ifBlank { "-" }}") },
+                onOpen = { actId -> nav.navigate("atividade/$id/$actId/-") },
+            )
+        }
+        composable("atividade/{tripId}/{actId}/{day}") { entry ->
+            val tripId = entry.arguments?.getString("tripId").orEmpty()
+            val actId = entry.arguments?.getString("actId").orEmpty()
+            val day = entry.arguments?.getString("day").orEmpty()
+            ActivityFormScreen(
+                tripId = tripId,
+                activityId = actId.takeIf { it != "novo" },
+                initialDay = if (day == "-") "" else day,
+                onDone = { nav.backFrom("atividade/") },
             )
         }
         composable("new") {

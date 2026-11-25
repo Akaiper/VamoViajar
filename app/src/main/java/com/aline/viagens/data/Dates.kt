@@ -53,3 +53,18 @@ object Dates {
         return ChronoUnit.DAYS.between(a, b)
     }
 }
+
+object Days {
+    private val ptBR = Locale("pt", "BR")
+    private val dayLabel = DateTimeFormatter.ofPattern("EEE, d 'de' MMM", ptBR)
+
+    /** Todos os dias da viagem (limitado a 60 para não travar com datas erradas). */
+    fun of(start: String, end: String): List<LocalDate> {
+        val a = Dates.parse(start) ?: return emptyList()
+        val b = Dates.parse(end) ?: a
+        if (b.isBefore(a)) return listOf(a)
+        return generateSequence(a) { it.plusDays(1) }.takeWhile { !it.isAfter(b) }.take(60).toList()
+    }
+
+    fun label(d: LocalDate): String = d.format(dayLabel).replaceFirstChar { it.uppercase() }
+}

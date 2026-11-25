@@ -214,11 +214,19 @@ object Repo {
             .addOnFailureListener { Log.e(TAG, "Erro ao editar viagem", it) }
     }
 
+    /** Apaga a viagem, o convite e todas as atividades do roteiro. */
     fun deleteTrip(trip: Trip) {
-        val batch = db.batch()
-        if (trip.inviteCode.isNotBlank()) batch.delete(db.collection("invites").document(trip.inviteCode))
-        batch.delete(db.collection("trips").document(trip.id))
-        batch.commit().addOnFailureListener { Log.e(TAG, "Erro ao apagar viagem", it) }
+        val tripRef = db.collection("trips").document(trip.id)
+        tripRef.collection("activities").get()
+            .continueWithTask { task ->
+                val batch = db.batch()
+                val docs = if (task.isSuccessful) task.result?.documents.orEmpty() else emptyList()
+                docs.take(450).forEach { batch.delete(it.reference) }
+                if (trip.inviteCode.isNotBlank()) batch.delete(db.collection("invites").document(trip.inviteCode))
+                batch.delete(tripRef)
+                batch.commit()
+            }
+            .addOnFailureListener { Log.e(TAG, "Erro ao apagar viagem", it) }
     }
 
     /** Entra numa viagem pelo código. Retorna o id da viagem. */
@@ -247,6 +255,69 @@ object Repo {
                 else -> UserMessageException("Não foi possível entrar na viagem.")
             }
         }
+    }
+
+    // ---------- Roteiro ----------
+
+    private fun activitiesRef(tripId: String) =
+        db.collection("trips").document(tripId).collection("activities")
+
+    fun activities(tripId: String): Flow<List<Activity>> = callbackFlow {
+        val reg = activitiesRef(tripId).addSnapshotListener { snap, err ->
+            if (err != null) Log.e(TAG, "Erro ao ler roteiro", err)
+            if (snap != null) trySend(snap.documents.mapNotNull { it.toActivity() })
+        }
+        awaitClose { reg.remove() }
+    }
+
+    fun activity(tripId: String, id: String): Flow<Activity?> = callbackFlow {
+        val reg = activitiesRef(tripId).document(id).addSnapshotListener { snap, _ ->
+            trySend(snap?.toActivity())
+        }
+        awaitClose { reg.remove() }
+    }
+
+    /** Cria (id vazio) ou atualiza uma atividade. Funciona offline. */
+    fun saveActivity(tripId: String, a: Activity, movedDay: Boolean) {
+        val data = mutableMapOf<String, Any?>(
+            "title" to a.title.trim(),
+            "day" to a.day,
+            "time" to a.time,
+            "place" to a.place.trim(),
+            "notes" to a.notes.trim(),
+            "category" to a.category,
+            "updatedAt" to FieldValue.serverTimestamp(),
+        )
+        if (a.id.isBlank()) {
+            data["createdByName"] = displayName()
+            activitiesRef(tripId).add(data).addOnFailureListener { Log.e(TAG, "Erro ao criar atividade", it) }
+        } else {
+            // Mudou de dia: sai da ordem manual do dia antigo e entra no fim do novo
+            if (movedDay) data["order"] = FieldValue.delete()
+            activitiesRef(tripId).document(a.id).update(data)
+                .addOnFailureListener { Log.e(TAG, "Erro ao salvar atividade", it) }
+        }
+    }
+
+    fun deleteActivity(tripId: String, id: String) {
+        activitiesRef(tripId).document(id).delete()
+            .addOnFailureListener { Log.e(TAG, "Erro ao apagar atividade", it) }
+    }
+
+    /** Salva a ordem manual de um dia (lista de ids na ordem desejada). */
+    fun setDayOrder(tripId: String, orderedIds: List<String>) {
+        val batch = db.batch()
+        orderedIds.forEachIndexed { i, id ->
+            batch.update(activitiesRef(tripId).document(id), "order", i.toDouble())
+        }
+        batch.commit().addOnFailureListener { Log.e(TAG, "Erro ao reordenar", it) }
+    }
+
+    /** Volta o dia para a ordem automática por horário. */
+    fun clearDayOrder(tripId: String, ids: List<String>) {
+        val batch = db.batch()
+        ids.forEach { batch.update(activitiesRef(tripId).document(it), "order", FieldValue.delete()) }
+        batch.commit().addOnFailureListener { Log.e(TAG, "Erro ao limpar ordem", it) }
     }
 
     private fun newInviteCode(): String {
