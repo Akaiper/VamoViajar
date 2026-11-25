@@ -1,0 +1,68 @@
+rules_version = '2';
+
+// Regras de segurança do VamoViajar.
+// Cole este conteúdo no console do Firebase: Firestore Database > Regras > Publicar.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function tripPath(tripId) {
+      return /databases/$(database)/documents/trips/$(tripId);
+    }
+
+    function isMember(tripId) {
+      return signedIn() && request.auth.uid in get(tripPath(tripId)).data.members;
+    }
+
+    // Preferências de cada pessoa (cores, modo claro/escuro): só a própria pessoa vê e muda.
+    match /users/{uid} {
+      allow read, write: if signedIn() && request.auth.uid == uid;
+    }
+
+    // Códigos de convite: qualquer pessoa logada pode consultar um código específico,
+    // mas ninguém consegue listar todos os códigos.
+    match /invites/{code} {
+      allow get: if signedIn();
+      allow create: if signedIn()
+        && request.auth.uid in getAfter(tripPath(request.resource.data.tripId)).data.members;
+      allow delete: if isMember(resource.data.tripId);
+    }
+
+    match /trips/{tripId} {
+      function isCurrentMember() {
+        return request.auth.uid in resource.data.members;
+      }
+
+      // Membro editando a viagem: pode mudar tudo, menos quem é dono e quem participa.
+      function memberEdit() {
+        return isCurrentMember()
+          && request.resource.data.ownerId == resource.data.ownerId
+          && request.resource.data.members == resource.data.members;
+      }
+
+      // Pessoa entrando pelo código: só pode adicionar a si mesma.
+      function joining() {
+        let added = request.resource.data.members.toSet().difference(resource.data.members.toSet());
+        return !isCurrentMember()
+          && added == [request.auth.uid].toSet()
+          && request.resource.data.members.size() == resource.data.members.size() + 1
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['members', 'memberNames']);
+      }
+
+      allow read: if signedIn() && isCurrentMember();
+      allow create: if signedIn()
+        && request.resource.data.ownerId == request.auth.uid
+        && request.resource.data.members == [request.auth.uid];
+      allow update: if signedIn() && (memberEdit() || joining());
+      allow delete: if signedIn() && resource.data.ownerId == request.auth.uid;
+
+      // Roteiro, checklist, reservas e gastos (próximas fases): só membros.
+      match /{sub=**} {
+        allow read, write: if isMember(tripId);
+      }
+    }
+  }
+}
