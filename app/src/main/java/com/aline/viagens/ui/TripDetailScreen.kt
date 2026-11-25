@@ -83,10 +83,12 @@ fun TripDetailScreen(
     onEdit: () -> Unit,
     onItinerary: () -> Unit,
     onChecklist: () -> Unit,
+    onBookings: () -> Unit,
 ) {
     val state by remember(tripId) { Repo.trip(tripId) }.collectAsStateWithLifecycle(initialValue = TripState.Loading)
     val activities by remember(tripId) { Repo.activities(tripId) }.collectAsStateWithLifecycle(initialValue = emptyList())
     val checklists by remember(tripId) { Repo.checklists(tripId) }.collectAsStateWithLifecycle(initialValue = emptyList())
+    val bookings by remember(tripId) { Repo.bookings(tripId) }.collectAsStateWithLifecycle(initialValue = emptyList())
     var menuOpen by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
     var deleting by remember { mutableStateOf(false) }
@@ -160,6 +162,19 @@ fun TripDetailScreen(
                             else -> "$n listas"
                         },
                         onClick = onChecklist,
+                    )
+                }
+                item {
+                    val n = bookings.size
+                    FeatureEntry(
+                        icon = Icons.Outlined.ConfirmationNumber,
+                        title = "Reservas",
+                        subtitle = when (n) {
+                            0 -> "Passagens, hospedagem, transporte e ingressos"
+                            1 -> "1 reserva"
+                            else -> "$n reservas"
+                        },
+                        onClick = onBookings,
                     )
                 }
                 item { InviteCard(trip, snackbar) }
@@ -356,7 +371,6 @@ private fun ComingSoon() {
     Column {
         SectionTitle("Em breve", Modifier.padding(bottom = 8.dp))
         val items = listOf(
-            Icons.Outlined.ConfirmationNumber to "Reservas",
             Icons.Outlined.Payments to "Gastos e divisão",
         )
         Card(

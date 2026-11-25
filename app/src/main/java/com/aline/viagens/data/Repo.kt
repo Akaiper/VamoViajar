@@ -229,6 +229,7 @@ object Repo {
             try {
                 val refs = mutableListOf<DocumentReference>()
                 refs += tripRef.collection("activities").get().await().documents.map { it.reference }
+                refs += tripRef.collection("bookings").get().await().documents.map { it.reference }
                 val lists = tripRef.collection("checklists").whereEqualTo("personal", false).get().await().documents +
                     tripRef.collection("checklists").whereEqualTo("ownerId", uid).get().await().documents
                 lists.distinctBy { it.id }.forEach { list ->
@@ -340,6 +341,55 @@ object Repo {
         val batch = db.batch()
         ids.forEach { batch.update(activitiesRef(tripId).document(it), "order", FieldValue.delete()) }
         batch.commit().addOnFailureListener { Log.e(TAG, "Erro ao limpar ordem", it) }
+    }
+
+    // ---------- Reservas ----------
+
+    private fun bookingsRef(tripId: String) =
+        db.collection("trips").document(tripId).collection("bookings")
+
+    fun bookings(tripId: String): Flow<List<Booking>> = callbackFlow {
+        val reg = bookingsRef(tripId).addSnapshotListener { snap, err ->
+            if (err != null) Log.e(TAG, "Erro ao ler reservas", err)
+            if (snap != null) trySend(snap.documents.mapNotNull { it.toBooking() })
+        }
+        awaitClose { reg.remove() }
+    }
+
+    fun booking(tripId: String, id: String): Flow<Booking?> = callbackFlow {
+        val reg = bookingsRef(tripId).document(id).addSnapshotListener { snap, _ -> trySend(snap?.toBooking()) }
+        awaitClose { reg.remove() }
+    }
+
+    /** Cria (id vazio) ou atualiza uma reserva. Funciona offline. */
+    fun saveBooking(tripId: String, b: Booking) {
+        val data = mutableMapOf<String, Any?>(
+            "type" to b.type,
+            "mode" to b.mode,
+            "title" to b.title.trim(),
+            "number" to b.number.trim(),
+            "from" to b.from.trim(),
+            "to" to b.to.trim(),
+            "address" to b.address.trim(),
+            "startDate" to b.startDate, "startTime" to b.startTime,
+            "endDate" to b.endDate, "endTime" to b.endTime,
+            "code" to b.code.trim(),
+            "link" to b.link.trim(),
+            "price" to b.price,
+            "paidById" to b.paidById, "paidByName" to b.paidByName,
+            "notes" to b.notes.trim(),
+            "updatedAt" to FieldValue.serverTimestamp(),
+        )
+        if (b.id.isBlank()) {
+            data["createdByName"] = displayName()
+            bookingsRef(tripId).add(data).addOnFailureListener { Log.e(TAG, "Erro ao criar reserva", it) }
+        } else {
+            bookingsRef(tripId).document(b.id).update(data).addOnFailureListener { Log.e(TAG, "Erro ao salvar reserva", it) }
+        }
+    }
+
+    fun deleteBooking(tripId: String, id: String) {
+        bookingsRef(tripId).document(id).delete().addOnFailureListener { Log.e(TAG, "Erro ao apagar reserva", it) }
     }
 
     // ---------- Checklist ----------
@@ -455,6 +505,18 @@ object Repo {
     fun deleteItem(tripId: String, listId: String, itemId: String) {
         itemsRef(tripId, listId).document(itemId).delete()
             .addOnFailureListener { Log.e(TAG, "Erro ao apagar item", it) }
+    }
+
+    /** Move os itens feitos para o fim, mantendo a ordem entre eles. Vale para todos da viagem. */
+    fun moveDoneToEnd(tripId: String, listId: String, doneIdsInOrder: List<String>) {
+        val base = System.currentTimeMillis()
+        doneIdsInOrder.chunked(400).forEachIndexed { c, chunk ->
+            val batch = db.batch()
+            chunk.forEachIndexed { i, id ->
+                batch.update(itemsRef(tripId, listId).document(id), "createdAtMs", base + c * 400 + i)
+            }
+            batch.commit().addOnFailureListener { Log.e(TAG, "Erro ao mover itens", it) }
+        }
     }
 
     fun uncheckAll(tripId: String, listId: String, itemIds: List<String>) {

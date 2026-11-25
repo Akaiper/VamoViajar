@@ -120,9 +120,9 @@ fun DocumentSnapshot.toCheckItem(): CheckItem? {
     )
 }
 
-/** Pendentes primeiro, na ordem em que foram adicionados; feitos no fim. */
+/** Sempre na ordem em que foram adicionados: marcar um item não muda a posição dele. */
 fun List<CheckItem>.sortedForList(): List<CheckItem> =
-    sortedWith(compareBy<CheckItem>({ it.done }, { it.createdAtMs }))
+    sortedWith(compareBy<CheckItem>({ it.createdAtMs }, { it.id }))
 
 /** Modelos de lista com itens sugeridos. */
 enum class ChecklistTemplate(val label: String, val items: List<String>) {
@@ -153,4 +153,133 @@ enum class ChecklistTemplate(val label: String, val items: List<String>) {
             "Saída de praia", "Bolsa à prova d'água para o celular",
         )
     ),
+}
+
+// ---------- Reservas ----------
+
+enum class BookingType(val id: String, val label: String) {
+    PASSAGEM("passagem", "Passagem"),
+    HOSPEDAGEM("hospedagem", "Hospedagem"),
+    TRANSPORTE("transporte", "Transporte"),
+    INGRESSO("ingresso", "Ingresso ou passeio");
+
+    companion object {
+        fun from(id: String) = entries.firstOrNull { it.id == id } ?: INGRESSO
+    }
+}
+
+enum class TravelMode(val id: String, val label: String) {
+    AVIAO("aviao", "Avião"),
+    ONIBUS("onibus", "Ônibus"),
+    TREM("trem", "Trem"),
+    BARCO("barco", "Barco");
+
+    companion object {
+        fun from(id: String) = entries.firstOrNull { it.id == id } ?: AVIAO
+    }
+}
+
+data class Booking(
+    val id: String = "",
+    val type: String = "passagem",
+    val mode: String = "aviao",      // só passagem
+    val title: String = "",          // companhia, hotel, locadora, nome do passeio
+    val number: String = "",         // número do voo/linha
+    val from: String = "",           // origem / local de retirada
+    val to: String = "",             // destino / local de devolução
+    val address: String = "",        // hospedagem e ingresso
+    val startDate: String = "", val startTime: String = "",
+    val endDate: String = "", val endTime: String = "",
+    val code: String = "",
+    val link: String = "",
+    val price: Double? = null,
+    val paidById: String = "", val paidByName: String = "",
+    val notes: String = "",
+    val createdByName: String = "",
+) {
+    val bookingType get() = BookingType.from(type)
+
+    /** Uma linha curta que descreve a reserva. */
+    fun summary(): String = when (bookingType) {
+        BookingType.PASSAGEM -> listOf(
+            TravelMode.from(mode).label,
+            number,
+            listOf(from, to).filter { it.isNotBlank() }.joinToString(" → "),
+        ).filter { it.isNotBlank() }.joinToString(" · ")
+        BookingType.HOSPEDAGEM, BookingType.INGRESSO -> address
+        BookingType.TRANSPORTE -> listOf(from, to).filter { it.isNotBlank() }.distinct().joinToString(" → ")
+    }
+
+    /** Os momentos desta reserva que aparecem no roteiro. */
+    fun events(): List<BookingEvent> {
+        val name = title.ifBlank { bookingType.label }
+        val list = mutableListOf<BookingEvent>()
+        fun add(day: String, time: String, label: String) {
+            if (day.isNotBlank()) list += BookingEvent(this, day, time, label)
+        }
+        when (bookingType) {
+            BookingType.PASSAGEM -> {
+                val route = listOf(from, to).filter { it.isNotBlank() }.joinToString(" → ")
+                val base = listOf(name, number).filter { it.isNotBlank() }.joinToString(" ")
+                add(startDate, startTime, "Saída: $base" + if (route.isNotBlank()) " ($route)" else "")
+                if (endDate.isNotBlank() && (endDate != startDate || endTime.isNotBlank())) {
+                    add(endDate, endTime, "Chegada: $base" + if (to.isNotBlank()) " em $to" else "")
+                }
+            }
+            BookingType.HOSPEDAGEM -> {
+                add(startDate, startTime, "Check-in: $name")
+                add(endDate, endTime, "Check-out: $name")
+            }
+            BookingType.TRANSPORTE -> {
+                add(startDate, startTime, "Retirada: $name" + if (from.isNotBlank()) " em $from" else "")
+                add(endDate, endTime, "Devolução: $name" + if (to.isNotBlank()) " em $to" else "")
+            }
+            BookingType.INGRESSO -> add(startDate, startTime, name)
+        }
+        return list
+    }
+}
+
+data class BookingEvent(val booking: Booking, val day: String, val time: String, val label: String)
+
+fun DocumentSnapshot.toBooking(): Booking? {
+    if (!exists()) return null
+    return Booking(
+        id = id,
+        type = getString("type") ?: "passagem",
+        mode = getString("mode") ?: "aviao",
+        title = getString("title").orEmpty(),
+        number = getString("number").orEmpty(),
+        from = getString("from").orEmpty(),
+        to = getString("to").orEmpty(),
+        address = getString("address").orEmpty(),
+        startDate = getString("startDate").orEmpty(),
+        startTime = getString("startTime").orEmpty(),
+        endDate = getString("endDate").orEmpty(),
+        endTime = getString("endTime").orEmpty(),
+        code = getString("code").orEmpty(),
+        link = getString("link").orEmpty(),
+        price = getDouble("price"),
+        paidById = getString("paidById").orEmpty(),
+        paidByName = getString("paidByName").orEmpty(),
+        notes = getString("notes").orEmpty(),
+        createdByName = getString("createdByName").orEmpty(),
+    )
+}
+
+object Money {
+    private val brl = java.text.NumberFormat.getCurrencyInstance(java.util.Locale("pt", "BR"))
+    fun format(v: Double): String = brl.format(v)
+
+    /** Aceita "1.234,56", "1234,56" ou "1234.56". */
+    fun parse(text: String): Double? {
+        val t = text.trim().replace("R$", "").replace(" ", "")
+        if (t.isBlank()) return null
+        val normalized = if (t.contains(",")) t.replace(".", "").replace(",", ".") else t
+        return normalized.toDoubleOrNull()
+    }
+
+    /** Valor para mostrar num campo de texto (sem R$). */
+    fun toField(v: Double?): String =
+        if (v == null) "" else String.format(java.util.Locale("pt", "BR"), "%.2f", v)
 }

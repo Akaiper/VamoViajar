@@ -15,6 +15,9 @@ import androidx.navigation.compose.rememberNavController
 import com.aline.viagens.data.Repo
 import com.aline.viagens.data.UserPrefs
 import com.aline.viagens.ui.ActivityFormScreen
+import com.aline.viagens.ui.BookingFormScreen
+import com.aline.viagens.ui.BookingsScreen
+import com.aline.viagens.data.BookingType
 import com.aline.viagens.ui.ChecklistScreen
 import com.aline.viagens.ui.ChecklistsScreen
 import com.aline.viagens.ui.ItineraryScreen
@@ -73,6 +76,25 @@ private fun MainNav(uid: String, prefs: UserPrefs) {
                 onEdit = { nav.navigate("edit/$id") },
                 onItinerary = { nav.navigate("roteiro/$id") },
                 onChecklist = { nav.navigate("checklist/$id") },
+                onBookings = { nav.navigate("reservas/$id") },
+            )
+        }
+        composable("reservas/{id}") { entry ->
+            val id = entry.arguments?.getString("id").orEmpty()
+            BookingsScreen(
+                tripId = id,
+                onBack = { nav.backFrom("reservas/") },
+                onOpen = { bId -> nav.navigate("reserva/$id/$bId/-") },
+                onNew = { type -> nav.navigate("reserva/$id/nova/${type.id}") },
+            )
+        }
+        composable("reserva/{tripId}/{bookingId}/{type}") { entry ->
+            val bId = entry.arguments?.getString("bookingId").orEmpty()
+            BookingFormScreen(
+                tripId = entry.arguments?.getString("tripId").orEmpty(),
+                bookingId = bId.takeIf { it != "nova" },
+                initialType = BookingType.from(entry.arguments?.getString("type").orEmpty()),
+                onDone = { nav.backFrom("reserva/") },
             )
         }
         composable("checklist/{id}") { entry ->
@@ -98,6 +120,7 @@ private fun MainNav(uid: String, prefs: UserPrefs) {
                 // "-" representa "sem dia" na rota
                 onAdd = { day -> nav.navigate("atividade/$id/novo/${day.ifBlank { "-" }}") },
                 onOpen = { actId -> nav.navigate("atividade/$id/$actId/-") },
+                onOpenBooking = { bId -> nav.navigate("reserva/$id/$bId/-") },
             )
         }
         composable("atividade/{tripId}/{actId}/{day}") { entry ->

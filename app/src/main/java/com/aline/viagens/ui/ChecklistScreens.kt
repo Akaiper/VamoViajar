@@ -30,6 +30,7 @@ import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.RemoveDone
+import androidx.compose.material.icons.automirrored.outlined.Sort
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -328,6 +329,16 @@ fun ChecklistScreen(tripId: String, listId: String, onBack: () -> Unit) {
                                 leadingIcon = { Icon(Icons.Outlined.Edit, null) },
                                 onClick = { menu = false; renaming = true },
                             )
+                            if (done > 0 && done < allItems.size) {
+                                DropdownMenuItem(
+                                    text = { Text("Mover feitos para o fim") },
+                                    leadingIcon = { Icon(Icons.AutoMirrored.Outlined.Sort, null) },
+                                    onClick = {
+                                        menu = false
+                                        Repo.moveDoneToEnd(tripId, listId, sorted.filter { it.done }.map { it.id })
+                                    },
+                                )
+                            }
                             if (done > 0) {
                                 DropdownMenuItem(
                                     text = { Text("Desmarcar tudo") },

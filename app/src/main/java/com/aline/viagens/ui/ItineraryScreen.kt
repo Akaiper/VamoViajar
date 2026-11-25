@@ -57,6 +57,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aline.viagens.data.Activity
+import com.aline.viagens.data.BookingEvent
 import com.aline.viagens.data.Days
 import com.aline.viagens.data.Repo
 import com.aline.viagens.data.TripState
@@ -89,9 +90,11 @@ fun ItineraryScreen(
     onBack: () -> Unit,
     onAdd: (day: String) -> Unit,
     onOpen: (activityId: String) -> Unit,
+    onOpenBooking: (bookingId: String) -> Unit,
 ) {
     val tripState by remember(tripId) { Repo.trip(tripId) }.collectAsStateWithLifecycle(initialValue = TripState.Loading)
     val activities by remember(tripId) { Repo.activities(tripId) }.collectAsStateWithLifecycle(initialValue = null)
+    val bookings by remember(tripId) { Repo.bookings(tripId) }.collectAsStateWithLifecycle(initialValue = emptyList())
     var reorderingDay by remember { mutableStateOf<String?>(null) }
 
     val trip = (tripState as? TripState.Found)?.trip
@@ -130,6 +133,7 @@ fun ItineraryScreen(
         val days = Days.of(trip.startDate, trip.endDate)
         val dayIds = days.map { it.toString() }.toSet()
         val byDay = list.groupBy { it.day }
+        val eventsByDay = bookings.flatMap { it.events() }.groupBy { it.day }
         val ideas = byDay[""].orEmpty().sortedBy { it.title.lowercase() }
         val outside = list.filter { it.day.isNotBlank() && it.day !in dayIds }.sortedWith(compareBy({ it.day }, { it.time }))
 
@@ -143,6 +147,8 @@ fun ItineraryScreen(
                 daySection(
                     key = dayId,
                     destination = trip.destination,
+                    events = eventsByDay[dayId].orEmpty().sortedBy { it.time.ifBlank { "99" } },
+                    onOpenBooking = onOpenBooking,
                     title = "Dia ${index + 1}",
                     subtitle = Days.label(date),
                     activities = dayList,
@@ -198,6 +204,8 @@ fun ItineraryScreen(
 private fun LazyListScope.daySection(
     key: String,
     destination: String,
+    events: List<BookingEvent>,
+    onOpenBooking: (String) -> Unit,
     title: String,
     subtitle: String,
     activities: List<Activity>,
@@ -230,8 +238,11 @@ private fun LazyListScope.daySection(
             }
         }
     }
+    itemsIndexed(events, key = { i, e -> "ev-$key-${e.booking.id}-$i" }) { _, e ->
+        BookingEventRow(e) { onOpenBooking(e.booking.id) }
+    }
     if (activities.isEmpty()) {
-        item(key = "empty-$key") { EmptyHint("Nada planejado ainda.") }
+        if (events.isEmpty()) item(key = "empty-$key") { EmptyHint("Nada planejado ainda.") }
     } else {
         itemsIndexed(activities, key = { _, a -> a.id }) { i, a ->
             ActivityCard(
@@ -345,6 +356,34 @@ private fun ActivityCard(
                 }
             }
             reorderControls?.invoke()
+        }
+    }
+}
+
+/** Uma reserva no roteiro: mais discreta que as atividades, com ícone da reserva. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun BookingEventRow(e: BookingEvent, onClick: () -> Unit) {
+    Card(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer),
+    ) {
+        Row(Modifier.padding(horizontal = 14.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(bookingIcon(e.booking), null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onTertiaryContainer)
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    listOfNotNull(e.time.takeIf { it.isNotBlank() }, "Reserva").joinToString(" · "),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.8f),
+                )
+                Text(
+                    e.label, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.onTertiaryContainer,
+                    maxLines = 2, overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
     }
 }
