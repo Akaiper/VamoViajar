@@ -1,0 +1,9 @@
+.gradle/
+build/
+local.properties
+.idea/
+*.iml
+.DS_Store
+# A chave de assinatura nunca vai para o repositório: ela vem dos segredos do GitHub
+*.jks
+*.keystore
