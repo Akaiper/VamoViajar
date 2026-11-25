@@ -19,6 +19,8 @@ import com.aline.viagens.ui.BookingFormScreen
 import com.aline.viagens.ui.BookingsScreen
 import com.aline.viagens.data.BookingType
 import com.aline.viagens.ui.ChecklistScreen
+import com.aline.viagens.ui.ExpenseFormScreen
+import com.aline.viagens.ui.ExpensesScreen
 import com.aline.viagens.ui.ChecklistsScreen
 import com.aline.viagens.ui.ItineraryScreen
 import com.aline.viagens.ui.LoginScreen
@@ -77,6 +79,27 @@ private fun MainNav(uid: String, prefs: UserPrefs) {
                 onItinerary = { nav.navigate("roteiro/$id") },
                 onChecklist = { nav.navigate("checklist/$id") },
                 onBookings = { nav.navigate("reservas/$id") },
+                onExpenses = { nav.navigate("gastos/$id") },
+            )
+        }
+        composable("gastos/{id}") { entry ->
+            val id = entry.arguments?.getString("id").orEmpty()
+            ExpensesScreen(
+                tripId = id,
+                uid = uid,
+                onBack = { nav.backFrom("gastos/") },
+                onNew = { nav.navigate("gasto/$id/novo") },
+                onOpenExpense = { eId -> nav.navigate("gasto/$id/$eId") },
+                onOpenBooking = { bId -> nav.navigate("reserva/$id/$bId/-") },
+            )
+        }
+        composable("gasto/{tripId}/{expenseId}") { entry ->
+            val eId = entry.arguments?.getString("expenseId").orEmpty()
+            ExpenseFormScreen(
+                tripId = entry.arguments?.getString("tripId").orEmpty(),
+                expenseId = eId.takeIf { it != "novo" },
+                uid = uid,
+                onDone = { nav.backFrom("gasto/") },
             )
         }
         composable("reservas/{id}") { entry ->
@@ -95,6 +118,7 @@ private fun MainNav(uid: String, prefs: UserPrefs) {
                 bookingId = bId.takeIf { it != "nova" },
                 initialType = BookingType.from(entry.arguments?.getString("type").orEmpty()),
                 onDone = { nav.backFrom("reserva/") },
+                onOpenActivity = { aId -> nav.navigate("atividade/${entry.arguments?.getString("tripId").orEmpty()}/$aId/-") },
             )
         }
         composable("checklist/{id}") { entry ->
@@ -132,6 +156,7 @@ private fun MainNav(uid: String, prefs: UserPrefs) {
                 activityId = actId.takeIf { it != "novo" },
                 initialDay = if (day == "-") "" else day,
                 onDone = { nav.backFrom("atividade/") },
+                onOpenBooking = { bId -> nav.navigate("reserva/$tripId/$bId/-") },
             )
         }
         composable("new") {

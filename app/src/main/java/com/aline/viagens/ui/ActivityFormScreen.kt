@@ -1,6 +1,8 @@
 package com.aline.viagens.ui
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -20,6 +22,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.Link
+import androidx.compose.material.icons.outlined.LinkOff
 import androidx.compose.material.icons.outlined.Map
 import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material3.AlertDialog
@@ -31,6 +35,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -70,6 +75,7 @@ fun ActivityFormScreen(
     activityId: String?,
     initialDay: String,
     onDone: () -> Unit,
+    onOpenBooking: (String) -> Unit,
 ) {
     val context = LocalContext.current
     val editing = activityId != null
@@ -85,6 +91,9 @@ fun ActivityFormScreen(
     var time by rememberSaveable { mutableStateOf("") }
     var place by rememberSaveable { mutableStateOf("") }
     var notes by rememberSaveable { mutableStateOf("") }
+    // Ids das reservas ligadas, separados por vírgula (fácil de guardar ao girar a tela)
+    var linkedCsv by rememberSaveable { mutableStateOf("") }
+    var pickBooking by remember { mutableStateOf(false) }
     var loaded by rememberSaveable { mutableStateOf(!editing) }
     var dayMenu by remember { mutableStateOf(false) }
     var timeDialog by remember { mutableStateOf(false) }
@@ -96,11 +105,14 @@ fun ActivityFormScreen(
         if (editing && !loaded && a != null) {
             title = a.title; category = a.category; day = a.day; originalDay = a.day
             time = a.time; place = a.place; notes = a.notes
+            linkedCsv = a.bookingIds.joinToString(",")
             loaded = true
         }
     }
 
     val trip = (tripState as? TripState.Found)?.trip
+    val bookings by remember(tripId) { Repo.bookings(tripId) }.collectAsStateWithLifecycle(initialValue = emptyList())
+    val linked = linkedCsv.split(",").filter { it.isNotBlank() }
     val days = trip?.let { Days.of(it.startDate, it.endDate) }.orEmpty()
 
     fun dayText(id: String): String {
@@ -210,6 +222,33 @@ fun ActivityFormScreen(
                 modifier = Modifier.fillMaxWidth(),
             )
 
+            Spacer(Modifier.height(16.dp))
+            FieldLabel("Reservas ligadas")
+            linked.forEach { id ->
+                val b = bookings.firstOrNull { it.id == id }
+                if (b != null) {
+                    LinkedBookingRow(
+                        b,
+                        onOpen = { onOpenBooking(b.id) },
+                        onRemove = { linkedCsv = (linked - id).joinToString(",") },
+                    )
+                }
+            }
+            val available = bookings.filter { it.id !in linked }
+            if (available.isNotEmpty()) {
+                OutlinedButton(onClick = { pickBooking = true }, modifier = Modifier.fillMaxWidth()) {
+                    Icon(Icons.Outlined.Link, null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Ligar uma reserva")
+                }
+            } else if (bookings.isEmpty()) {
+                Text(
+                    "Nenhuma reserva nesta viagem ainda.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
             error?.let {
                 Spacer(Modifier.height(12.dp))
                 Text(it, color = MaterialTheme.colorScheme.error)
@@ -231,6 +270,7 @@ fun ActivityFormScreen(
                                 place = place,
                                 notes = notes,
                                 category = category,
+                                bookingIds = linked,
                             ),
                             movedDay = editing && day != originalDay,
                         )
@@ -249,6 +289,37 @@ fun ActivityFormScreen(
                 )
             }
         }
+    }
+
+    if (pickBooking) {
+        AlertDialog(
+            onDismissRequest = { pickBooking = false },
+            title = { Text("Ligar uma reserva") },
+            text = {
+                Column(Modifier.verticalScroll(rememberScrollState())) {
+                    bookings.filter { it.id !in linked }.forEach { b ->
+                        ListItem(
+                            headlineContent = { Text(b.title.ifBlank { b.bookingType.label }) },
+                            supportingContent = {
+                                Text(listOf(b.bookingType.label, b.summary()).filter { it.isNotBlank() }.joinToString(" · "))
+                            },
+                            leadingContent = { Icon(bookingIcon(b), null) },
+                            modifier = Modifier.clickable {
+                                linkedCsv = (linked + b.id).joinToString(",")
+                                // A primeira reserva preenche dia e horário, se ainda estiverem vazios
+                                if (linked.isEmpty()) {
+                                    if (day.isBlank() && b.startDate.isNotBlank()) day = b.startDate
+                                    if (time.isBlank() && b.startTime.isNotBlank()) time = b.startTime
+                                }
+                                pickBooking = false
+                            },
+                        )
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = { TextButton(onClick = { pickBooking = false }) { Text("Cancelar") } },
+        )
     }
 
     if (timeDialog) {
@@ -299,4 +370,25 @@ private fun FieldLabel(text: String) {
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.padding(bottom = 8.dp),
     )
+}
+
+@Composable
+private fun LinkedBookingRow(b: com.aline.viagens.data.Booking, onOpen: () -> Unit, onRemove: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().clickable(onClick = onOpen).padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(bookingIcon(b), null, tint = MaterialTheme.colorScheme.primary)
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text(b.title.ifBlank { b.bookingType.label }, style = MaterialTheme.typography.bodyLarge)
+            Text(
+                listOf(b.summary(), b.code.takeIf { it.isNotBlank() }?.let { "Código $it" }.orEmpty())
+                    .filter { it.isNotBlank() }.joinToString(" · "),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        IconButton(onClick = onRemove) { Icon(Icons.Outlined.LinkOff, "Desligar") }
+    }
 }

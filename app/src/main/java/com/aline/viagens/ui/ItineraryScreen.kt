@@ -57,6 +57,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aline.viagens.data.Activity
+import com.aline.viagens.data.Booking
 import com.aline.viagens.data.BookingEvent
 import com.aline.viagens.data.Days
 import com.aline.viagens.data.Repo
@@ -134,6 +135,7 @@ fun ItineraryScreen(
         val dayIds = days.map { it.toString() }.toSet()
         val byDay = list.groupBy { it.day }
         val eventsByDay = bookings.flatMap { it.events() }.groupBy { it.day }
+        val bookingsById = bookings.associateBy { it.id }
         val ideas = byDay[""].orEmpty().sortedBy { it.title.lowercase() }
         val outside = list.filter { it.day.isNotBlank() && it.day !in dayIds }.sortedWith(compareBy({ it.day }, { it.time }))
 
@@ -147,7 +149,11 @@ fun ItineraryScreen(
                 daySection(
                     key = dayId,
                     destination = trip.destination,
-                    events = eventsByDay[dayId].orEmpty().sortedBy { it.time.ifBlank { "99" } },
+                    // Reserva ligada a uma atividade deste dia não aparece duplicada
+                    events = eventsByDay[dayId].orEmpty()
+                        .filter { e -> dayList.none { e.booking.id in it.bookingIds } }
+                        .sortedBy { it.time.ifBlank { "99" } },
+                    bookingsById = bookingsById,
                     onOpenBooking = onOpenBooking,
                     title = "Dia ${index + 1}",
                     subtitle = Days.label(date),
@@ -183,7 +189,7 @@ fun ItineraryScreen(
             if (ideas.isEmpty()) {
                 item(key = "ideas-empty") { EmptyHint("Nenhuma ideia ainda. Toque no + para anotar uma.") }
             } else {
-                itemsIndexed(ideas, key = { _, a -> a.id }) { _, a -> ActivityCard(a, trip.destination, onClick = { onOpen(a.id) }) }
+                itemsIndexed(ideas, key = { _, a -> a.id }) { _, a -> ActivityCard(a, trip.destination, linked = a.bookingIds.mapNotNull { bookingsById[it] }, onOpenBooking = onOpenBooking, onClick = { onOpen(a.id) }) }
             }
 
             if (outside.isNotEmpty()) {
@@ -195,7 +201,7 @@ fun ItineraryScreen(
                         modifier = Modifier.padding(top = 16.dp),
                     )
                 }
-                itemsIndexed(outside, key = { _, a -> a.id }) { _, a -> ActivityCard(a, trip.destination, showDay = true, onClick = { onOpen(a.id) }) }
+                itemsIndexed(outside, key = { _, a -> a.id }) { _, a -> ActivityCard(a, trip.destination, linked = a.bookingIds.mapNotNull { bookingsById[it] }, onOpenBooking = onOpenBooking, showDay = true, onClick = { onOpen(a.id) }) }
             }
         }
     }
@@ -206,6 +212,7 @@ private fun LazyListScope.daySection(
     destination: String,
     events: List<BookingEvent>,
     onOpenBooking: (String) -> Unit,
+    bookingsById: Map<String, Booking>,
     title: String,
     subtitle: String,
     activities: List<Activity>,
@@ -248,6 +255,8 @@ private fun LazyListScope.daySection(
             ActivityCard(
                 activity = a,
                 destination = destination,
+                linked = a.bookingIds.mapNotNull { bookingsById[it] },
+                onOpenBooking = onOpenBooking,
                 onClick = { if (!reordering) onOpen(a.id) },
                 reorderControls = if (reordering) {
                     {
@@ -302,6 +311,8 @@ private fun EmptyHint(text: String) {
 private fun ActivityCard(
     activity: Activity,
     destination: String,
+    linked: List<Booking> = emptyList(),
+    onOpenBooking: (String) -> Unit = {},
     showDay: Boolean = false,
     onClick: () -> Unit,
     reorderControls: (@Composable () -> Unit)? = null,
@@ -353,6 +364,20 @@ private fun ActivityCard(
                         label = { Text(activity.place, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                         leadingIcon = { Icon(Icons.Outlined.Map, null, Modifier.size(18.dp)) },
                     )
+                }
+                if (reorderControls == null) {
+                    linked.forEach { b ->
+                        AssistChip(
+                            onClick = { onOpenBooking(b.id) },
+                            label = {
+                                Text(
+                                    listOf(b.title.ifBlank { b.bookingType.label }, b.code).filter { it.isNotBlank() }.joinToString(" · "),
+                                    maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                )
+                            },
+                            leadingIcon = { Icon(bookingIcon(b), null, Modifier.size(18.dp)) },
+                        )
+                    }
                 }
             }
             reorderControls?.invoke()

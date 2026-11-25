@@ -324,7 +324,13 @@ private fun BookingCard(b: Booking, snackbar: SnackbarHostState, onClick: () -> 
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
-fun BookingFormScreen(tripId: String, bookingId: String?, initialType: BookingType, onDone: () -> Unit) {
+fun BookingFormScreen(
+    tripId: String,
+    bookingId: String?,
+    initialType: BookingType,
+    onDone: () -> Unit,
+    onOpenActivity: (String) -> Unit,
+) {
     val context = LocalContext.current
     val editing = bookingId != null
     val tripState by remember(tripId) { Repo.trip(tripId) }.collectAsStateWithLifecycle(initialValue = TripState.Loading)
@@ -332,6 +338,7 @@ fun BookingFormScreen(tripId: String, bookingId: String?, initialType: BookingTy
         bookingId?.let { Repo.booking(tripId, it) } ?: flowOf(null)
     }.collectAsStateWithLifecycle(initialValue = null)
     val trip = (tripState as? TripState.Found)?.trip
+    val activities by remember(tripId) { Repo.activities(tripId) }.collectAsStateWithLifecycle(initialValue = emptyList())
 
     var type by rememberSaveable { mutableStateOf(initialType.id) }
     var mode by rememberSaveable { mutableStateOf("aviao") }
@@ -350,6 +357,9 @@ fun BookingFormScreen(tripId: String, bookingId: String?, initialType: BookingTy
     var paidById by rememberSaveable { mutableStateOf("") }
     var paidByName by rememberSaveable { mutableStateOf("") }
     var notes by rememberSaveable { mutableStateOf("") }
+    var splitMode by rememberSaveable { mutableStateOf("todos") }
+    var splitParts by rememberSaveable { mutableStateOf("") }
+    var splitShares by rememberSaveable { mutableStateOf("") }
     var loaded by rememberSaveable { mutableStateOf(!editing) }
     var payerMenu by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
@@ -362,6 +372,7 @@ fun BookingFormScreen(tripId: String, bookingId: String?, initialType: BookingTy
             address = b.address; startDate = b.startDate; startTime = b.startTime; endDate = b.endDate; endTime = b.endTime
             code = b.code; link = b.link; price = Money.toField(b.price); paidById = b.paidById; paidByName = b.paidByName
             notes = b.notes
+            SplitState.from(b.split).let { splitMode = it.mode; splitParts = it.participants; splitShares = it.shares }
             loaded = true
         }
     }
@@ -493,6 +504,25 @@ fun BookingFormScreen(tripId: String, bookingId: String?, initialType: BookingTy
                 }
             }
 
+            val splitState = SplitState(splitMode, splitParts, splitShares)
+            if (Money.parse(price) != null) {
+                Spacer(Modifier.height(12.dp))
+                Label("Dividir entre")
+                SplitEditor(
+                    state = splitState,
+                    onChange = { splitMode = it.mode; splitParts = it.participants; splitShares = it.shares },
+                    members = trip?.let { tr -> tr.members.map { Pair(it, tr.memberNames[it] ?: "Viajante") } }.orEmpty(),
+                    amount = Money.parse(price),
+                )
+                if (paidById.isBlank()) {
+                    Text(
+                        "Escolha quem pagou para esta reserva entrar nos gastos.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+
             Spacer(Modifier.height(12.dp))
             OutlinedTextField(
                 value = notes, onValueChange = { notes = it },
@@ -501,6 +531,27 @@ fun BookingFormScreen(tripId: String, bookingId: String?, initialType: BookingTy
                 keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
                 modifier = Modifier.fillMaxWidth(),
             )
+
+            val linkedActivities = if (bookingId == null) emptyList() else activities.filter { bookingId in it.bookingIds }
+            if (linkedActivities.isNotEmpty()) {
+                Spacer(Modifier.height(16.dp))
+                Label("Atividades ligadas")
+                linkedActivities.forEach { a ->
+                    ListItem(
+                        headlineContent = { Text(a.title) },
+                        supportingContent = {
+                            Text(
+                                listOfNotNull(
+                                    Dates.parse(a.day)?.let { Days.label(it) } ?: "Ideia sem dia",
+                                    a.time.takeIf { it.isNotBlank() },
+                                ).joinToString(" · ")
+                            )
+                        },
+                        leadingContent = { Icon(Category.from(a.category).icon, null) },
+                        modifier = Modifier.clickable { onOpenActivity(a.id) },
+                    )
+                }
+            }
 
             error?.let {
                 Spacer(Modifier.height(12.dp))
@@ -521,6 +572,8 @@ fun BookingFormScreen(tripId: String, bookingId: String?, initialType: BookingTy
                             }
                         })."
                         price.isNotBlank() && parsed == null -> error = "Valor inválido. Use por exemplo 1234,50."
+                        parsed != null && SplitState(splitMode, splitParts, splitShares).problem(parsed) != null ->
+                            error = SplitState(splitMode, splitParts, splitShares).problem(parsed)
                         endDate.isNotBlank() && startDate.isNotBlank() && endDate < startDate ->
                             error = "A data final está antes da inicial."
                         else -> {
@@ -537,6 +590,7 @@ fun BookingFormScreen(tripId: String, bookingId: String?, initialType: BookingTy
                                     endTime = if (t == BookingType.INGRESSO) "" else endTime,
                                     code = code, link = link, price = parsed,
                                     paidById = paidById, paidByName = paidByName, notes = notes,
+                                    split = SplitState(splitMode, splitParts, splitShares).toSplit(),
                                 ),
                             )
                             onDone()

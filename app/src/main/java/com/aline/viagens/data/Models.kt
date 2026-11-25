@@ -52,6 +52,7 @@ data class Activity(
     val category: String = "passeio",
     val order: Double? = null, // preenchido só quando o dia foi reordenado na mão
     val createdByName: String = "",
+    val bookingIds: List<String> = emptyList(), // reservas ligadas a esta atividade
 )
 
 fun DocumentSnapshot.toActivity(): Activity? {
@@ -66,6 +67,7 @@ fun DocumentSnapshot.toActivity(): Activity? {
         category = getString("category") ?: "passeio",
         order = getDouble("order"),
         createdByName = getString("createdByName").orEmpty(),
+        bookingIds = (get("bookingIds") as? List<*>)?.filterIsInstance<String>().orEmpty(),
     )
 }
 
@@ -196,6 +198,7 @@ data class Booking(
     val paidById: String = "", val paidByName: String = "",
     val notes: String = "",
     val createdByName: String = "",
+    val split: Split = Split(), // como o valor é dividido nos gastos
 ) {
     val bookingType get() = BookingType.from(type)
 
@@ -264,6 +267,7 @@ fun DocumentSnapshot.toBooking(): Booking? {
         paidByName = getString("paidByName").orEmpty(),
         notes = getString("notes").orEmpty(),
         createdByName = getString("createdByName").orEmpty(),
+        split = Split.from(this),
     )
 }
 

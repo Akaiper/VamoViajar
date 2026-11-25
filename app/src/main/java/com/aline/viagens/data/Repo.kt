@@ -230,6 +230,8 @@ object Repo {
                 val refs = mutableListOf<DocumentReference>()
                 refs += tripRef.collection("activities").get().await().documents.map { it.reference }
                 refs += tripRef.collection("bookings").get().await().documents.map { it.reference }
+                refs += tripRef.collection("expenses").get().await().documents.map { it.reference }
+                refs += tripRef.collection("payments").get().await().documents.map { it.reference }
                 val lists = tripRef.collection("checklists").whereEqualTo("personal", false).get().await().documents +
                     tripRef.collection("checklists").whereEqualTo("ownerId", uid).get().await().documents
                 lists.distinctBy { it.id }.forEach { list ->
@@ -309,6 +311,7 @@ object Repo {
             "place" to a.place.trim(),
             "notes" to a.notes.trim(),
             "category" to a.category,
+            "bookingIds" to a.bookingIds,
             "updatedAt" to FieldValue.serverTimestamp(),
         )
         if (a.id.isBlank()) {
@@ -380,6 +383,7 @@ object Repo {
             "notes" to b.notes.trim(),
             "updatedAt" to FieldValue.serverTimestamp(),
         )
+        data.putAll(b.split.toMap())
         if (b.id.isBlank()) {
             data["createdByName"] = displayName()
             bookingsRef(tripId).add(data).addOnFailureListener { Log.e(TAG, "Erro ao criar reserva", it) }
@@ -390,6 +394,72 @@ object Repo {
 
     fun deleteBooking(tripId: String, id: String) {
         bookingsRef(tripId).document(id).delete().addOnFailureListener { Log.e(TAG, "Erro ao apagar reserva", it) }
+    }
+
+    // ---------- Gastos ----------
+
+    private fun expensesRef(tripId: String) = db.collection("trips").document(tripId).collection("expenses")
+    private fun paymentsRef(tripId: String) = db.collection("trips").document(tripId).collection("payments")
+
+    fun expenses(tripId: String): Flow<List<Expense>> = callbackFlow {
+        val reg = expensesRef(tripId).addSnapshotListener { snap, err ->
+            if (err != null) Log.e(TAG, "Erro ao ler gastos", err)
+            if (snap != null) trySend(snap.documents.mapNotNull { it.toExpense() })
+        }
+        awaitClose { reg.remove() }
+    }
+
+    fun expense(tripId: String, id: String): Flow<Expense?> = callbackFlow {
+        val reg = expensesRef(tripId).document(id).addSnapshotListener { snap, _ -> trySend(snap?.toExpense()) }
+        awaitClose { reg.remove() }
+    }
+
+    fun payments(tripId: String): Flow<List<Payment>> = callbackFlow {
+        val reg = paymentsRef(tripId).addSnapshotListener { snap, err ->
+            if (err != null) Log.e(TAG, "Erro ao ler pagamentos", err)
+            if (snap != null) trySend(snap.documents.mapNotNull { it.toPayment() })
+        }
+        awaitClose { reg.remove() }
+    }
+
+    fun saveExpense(tripId: String, e: Expense) {
+        val data = mutableMapOf<String, Any?>(
+            "title" to e.title.trim(),
+            "amount" to e.amount,
+            "category" to e.category,
+            "date" to e.date,
+            "paidById" to e.paidById,
+            "paidByName" to e.paidByName,
+            "updatedAt" to FieldValue.serverTimestamp(),
+        )
+        data.putAll(e.split.toMap())
+        if (e.id.isBlank()) {
+            data["createdByName"] = displayName()
+            data["createdAtMs"] = System.currentTimeMillis()
+            expensesRef(tripId).add(data).addOnFailureListener { Log.e(TAG, "Erro ao criar gasto", it) }
+        } else {
+            expensesRef(tripId).document(e.id).update(data).addOnFailureListener { Log.e(TAG, "Erro ao salvar gasto", it) }
+        }
+    }
+
+    fun deleteExpense(tripId: String, id: String) {
+        expensesRef(tripId).document(id).delete().addOnFailureListener { Log.e(TAG, "Erro ao apagar gasto", it) }
+    }
+
+    fun addPayment(tripId: String, fromId: String, fromName: String, toId: String, toName: String, amount: Double) {
+        paymentsRef(tripId).add(
+            mapOf(
+                "fromId" to fromId, "fromName" to fromName,
+                "toId" to toId, "toName" to toName,
+                "amount" to amount,
+                "createdAtMs" to System.currentTimeMillis(),
+                "createdByName" to displayName(),
+            )
+        ).addOnFailureListener { Log.e(TAG, "Erro ao registrar pagamento", it) }
+    }
+
+    fun deletePayment(tripId: String, id: String) {
+        paymentsRef(tripId).document(id).delete().addOnFailureListener { Log.e(TAG, "Erro ao apagar pagamento", it) }
     }
 
     // ---------- Checklist ----------

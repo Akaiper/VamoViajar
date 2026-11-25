@@ -84,6 +84,7 @@ fun TripDetailScreen(
     onItinerary: () -> Unit,
     onChecklist: () -> Unit,
     onBookings: () -> Unit,
+    onExpenses: () -> Unit,
 ) {
     val state by remember(tripId) { Repo.trip(tripId) }.collectAsStateWithLifecycle(initialValue = TripState.Loading)
     val activities by remember(tripId) { Repo.activities(tripId) }.collectAsStateWithLifecycle(initialValue = emptyList())
@@ -177,9 +178,16 @@ fun TripDetailScreen(
                         onClick = onBookings,
                     )
                 }
+                item {
+                    FeatureEntry(
+                        icon = Icons.Outlined.Payments,
+                        title = "Gastos e divisão",
+                        subtitle = "Quem pagou o quê e quem deve para quem",
+                        onClick = onExpenses,
+                    )
+                }
                 item { InviteCard(trip, snackbar) }
                 item { People(trip) }
-                item { ComingSoon() }
             }
         }
     }
