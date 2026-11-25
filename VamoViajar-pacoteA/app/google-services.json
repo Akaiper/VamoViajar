@@ -1,0 +1,47 @@
+{
+  "project_info": {
+    "project_number": "670417227553",
+    "project_id": "viagens-aline",
+    "storage_bucket": "viagens-aline.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:670417227553:android:87fcf914ac4c060b587860",
+        "android_client_info": {
+          "package_name": "com.aline.viagens"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "670417227553-et4gv16iacfpnetkjn2c9plddas9ib4l.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.aline.viagens",
+            "certificate_hash": "f79a810345105325039ee60417599bcb8619f06a"
+          }
+        },
+        {
+          "client_id": "670417227553-75j5bhmt60r192ktk467sj1j3crat2ak.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCQ6UHAK_Ayew-k-x3T7NB1c_J9547mYQ4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "670417227553-75j5bhmt60r192ktk467sj1j3crat2ak.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
