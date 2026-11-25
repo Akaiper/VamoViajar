@@ -23,6 +23,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.Directions
+import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material.icons.outlined.KeyboardArrowDown
 import androidx.compose.material.icons.outlined.KeyboardArrowUp
 import androidx.compose.material.icons.outlined.Lightbulb
@@ -60,6 +62,8 @@ import com.aline.viagens.data.Activity
 import com.aline.viagens.data.Booking
 import com.aline.viagens.data.BookingEvent
 import com.aline.viagens.data.Days
+import com.aline.viagens.data.Dates
+import com.aline.viagens.data.Trip
 import com.aline.viagens.data.Repo
 import com.aline.viagens.data.TripState
 import com.aline.viagens.data.sortedForDay
@@ -97,6 +101,7 @@ fun ItineraryScreen(
     val activities by remember(tripId) { Repo.activities(tripId) }.collectAsStateWithLifecycle(initialValue = null)
     val bookings by remember(tripId) { Repo.bookings(tripId) }.collectAsStateWithLifecycle(initialValue = emptyList())
     var reorderingDay by remember { mutableStateOf<String?>(null) }
+    val context = LocalContext.current
 
     val trip = (tripState as? TripState.Found)?.trip
     if (tripState is TripState.Missing) {
@@ -120,6 +125,19 @@ fun ItineraryScreen(
                 },
                 navigationIcon = {
                     IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Voltar") }
+                },
+                actions = {
+                    val t = trip
+                    val acts = activities
+                    if (t != null && acts != null) {
+                        IconButton(onClick = {
+                            val send = Intent(Intent.ACTION_SEND).apply {
+                                type = "text/plain"
+                                putExtra(Intent.EXTRA_TEXT, itineraryText(t, acts, bookings))
+                            }
+                            context.startActivity(Intent.createChooser(send, "Compartilhar roteiro"))
+                        }) { Icon(Icons.Outlined.Share, "Compartilhar roteiro") }
+                    }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
             )
@@ -162,6 +180,9 @@ fun ItineraryScreen(
                     manual = dayList.any { it.order != null },
                     onAdd = { onAdd(dayId) },
                     onToggleReorder = { reorderingDay = if (reorderingDay == dayId) null else dayId },
+                    onRoute = routePlaces(dayList).takeIf { it.size >= 2 }?.let { places ->
+                        { openRoute(context, places, trip.destination) }
+                    },
                     onResetOrder = {
                         Repo.clearDayOrder(tripId, dayList.map { it.id })
                         reorderingDay = null
@@ -220,6 +241,7 @@ private fun LazyListScope.daySection(
     manual: Boolean,
     onAdd: () -> Unit,
     onToggleReorder: () -> Unit,
+    onRoute: (() -> Unit)?,
     onResetOrder: () -> Unit,
     onMove: (from: Int, to: Int) -> Unit,
     onOpen: (String) -> Unit,
@@ -236,6 +258,9 @@ private fun LazyListScope.daySection(
                         } else {
                             IconButton(onClick = onToggleReorder) { Icon(Icons.Outlined.SwapVert, "Reordenar") }
                         }
+                    }
+                    if (!reordering && onRoute != null) {
+                        IconButton(onClick = onRoute) { Icon(Icons.Outlined.Directions, "Ver rota do dia no mapa") }
                     }
                     if (!reordering) IconButton(onClick = onAdd) { Icon(Icons.Outlined.Add, "Adicionar atividade") }
                 },
@@ -411,4 +436,56 @@ private fun BookingEventRow(e: BookingEvent, onClick: () -> Unit) {
             }
         }
     }
+}
+
+/** Locais das atividades do dia, na ordem do roteiro (links do Maps não entram, porque não servem de parada). */
+private fun routePlaces(day: List<Activity>): List<String> =
+    day.map { it.place.trim() }.filter { it.isNotBlank() && !it.startsWith("http") }.distinct()
+
+/** Abre o Google Maps com o trajeto passando pelos locais do dia. */
+private fun openRoute(context: Context, places: List<String>, destination: String) {
+    fun withCity(p: String) =
+        if (destination.isBlank() || p.contains(destination.trim(), ignoreCase = true)) p else "$p, ${destination.trim()}"
+    val stops = places.take(10).map { withCity(it) }
+    val url = StringBuilder("https://www.google.com/maps/dir/?api=1")
+        .append("&origin=").append(Uri.encode(stops.first()))
+        .append("&destination=").append(Uri.encode(stops.last()))
+    if (stops.size > 2) url.append("&waypoints=").append(Uri.encode(stops.subList(1, stops.size - 1).joinToString("|")))
+    runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url.toString()))) }
+}
+
+/** O roteiro em texto, para mandar no WhatsApp. */
+private fun itineraryText(trip: Trip, activities: List<Activity>, bookings: List<Booking>): String {
+    val sb = StringBuilder()
+    sb.append("🧳 ").append(trip.name)
+    if (trip.destination.isNotBlank()) sb.append(" — ").append(trip.destination)
+    sb.append("\n").append(Dates.range(trip.startDate, trip.endDate)).append("\n")
+    val byDay = activities.groupBy { it.day }
+    val events = bookings.flatMap { it.events() }.groupBy { it.day }
+    Days.of(trip.startDate, trip.endDate).forEachIndexed { i, date ->
+        val id = date.toString()
+        val dayActs = byDay[id].orEmpty().sortedForDay()
+        val dayEvents = events[id].orEmpty().filter { e -> dayActs.none { e.booking.id in it.bookingIds } }
+        if (dayActs.isEmpty() && dayEvents.isEmpty()) return@forEachIndexed
+        sb.append("\n*Dia ").append(i + 1).append(" · ").append(Days.label(date)).append("*\n")
+        dayEvents.sortedBy { it.time.ifBlank { "99" } }.forEach { e ->
+            sb.append("• ")
+            if (e.time.isNotBlank()) sb.append(e.time).append(" ")
+            sb.append(e.label).append("\n")
+        }
+        dayActs.forEach { a ->
+            sb.append("• ")
+            if (a.time.isNotBlank()) sb.append(a.time).append(" ")
+            sb.append(a.title)
+            if (a.place.isNotBlank() && !a.place.startsWith("http")) sb.append(" (").append(a.place).append(")")
+            sb.append("\n")
+        }
+    }
+    val ideas = byDay[""].orEmpty()
+    if (ideas.isNotEmpty()) {
+        sb.append("\n*Ideias*\n")
+        ideas.forEach { sb.append("• ").append(it.title).append("\n") }
+    }
+    sb.append("\nFeito no VamoViajar")
+    return sb.toString()
 }

@@ -254,6 +254,32 @@ object Repo {
         }
     }
 
+    /** A própria pessoa sai da viagem. */
+    fun leaveTrip(tripId: String) {
+        val uid = auth.currentUser?.uid ?: return
+        db.collection("trips").document(tripId)
+            .update(mapOf("members" to FieldValue.arrayRemove(uid), "memberNames.$uid" to FieldValue.delete()))
+            .addOnFailureListener { Log.e(TAG, "Erro ao sair da viagem", it) }
+    }
+
+    /** Quem criou a viagem remove uma pessoa. */
+    fun removeMember(tripId: String, memberId: String) {
+        db.collection("trips").document(tripId)
+            .update(mapOf("members" to FieldValue.arrayRemove(memberId), "memberNames.$memberId" to FieldValue.delete()))
+            .addOnFailureListener { Log.e(TAG, "Erro ao remover pessoa", it) }
+    }
+
+    /** Troca o código de convite: o antigo para de funcionar na hora. */
+    fun newInviteCodeFor(trip: Trip) {
+        val user = auth.currentUser ?: return
+        val code = newInviteCode()
+        val batch = db.batch()
+        batch.set(db.collection("invites").document(code), mapOf("tripId" to trip.id, "createdBy" to user.uid))
+        if (trip.inviteCode.isNotBlank()) batch.delete(db.collection("invites").document(trip.inviteCode))
+        batch.update(db.collection("trips").document(trip.id), "inviteCode", code)
+        batch.commit().addOnFailureListener { Log.e(TAG, "Erro ao trocar código", it) }
+    }
+
     /** Entra numa viagem pelo código. Retorna o id da viagem. */
     suspend fun joinTrip(rawCode: String): String {
         val user = auth.currentUser ?: throw UserMessageException("Faça login de novo.")

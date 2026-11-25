@@ -59,6 +59,7 @@ import com.aline.viagens.data.Dates
 import com.aline.viagens.data.Repo
 import com.aline.viagens.data.Trip
 import com.aline.viagens.data.UserMessageException
+import com.aline.viagens.data.Updates
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -71,9 +72,15 @@ fun TripsScreen(
 ) {
     val trips by remember(uid) { Repo.trips(uid) }.collectAsStateWithLifecycle(initialValue = null)
     var showJoin by remember { mutableStateOf(false) }
+    val context = androidx.compose.ui.platform.LocalContext.current
+    var latest by remember { mutableStateOf<Long?>(null) }
+    var dismissedUpdate by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
+    androidx.compose.runtime.LaunchedEffect(Unit) { latest = Updates.latestBuild() }
+    val newBuild = latest?.takeIf { it > Updates.installedBuild(context) && !dismissedUpdate }
 
     Scaffold(
         topBar = {
+          Column {
             TopAppBar(
                 title = { Text("Minhas viagens") },
                 actions = {
@@ -82,6 +89,20 @@ fun TripsScreen(
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
             )
+            if (newBuild != null) {
+                UpdateBanner(
+                    build = newBuild,
+                    onDownload = {
+                        runCatching {
+                            context.startActivity(
+                                android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(Updates.RELEASES_URL))
+                            )
+                        }
+                    },
+                    onDismiss = { dismissedUpdate = true },
+                )
+            }
+          }
         },
         floatingActionButton = {
             ExtendedFloatingActionButton(
@@ -277,4 +298,29 @@ private fun JoinTripDialog(onDismiss: () -> Unit, onJoined: (String) -> Unit) {
         },
         dismissButton = { TextButton(onClick = onDismiss, enabled = !busy) { Text("Cancelar") } },
     )
+}
+
+@Composable
+private fun UpdateBanner(build: Long, onDownload: () -> Unit, onDismiss: () -> Unit) {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+    ) {
+        Column(Modifier.padding(16.dp)) {
+            Text(
+                "Tem versão nova do app (0.1.$build)",
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onTertiaryContainer,
+            )
+            Text(
+                "Baixe e instale por cima, suas viagens continuam salvas.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onTertiaryContainer,
+            )
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                TextButton(onClick = onDismiss) { Text("Agora não") }
+                TextButton(onClick = onDownload) { Text("Baixar") }
+            }
+        }
+    }
 }

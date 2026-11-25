@@ -23,6 +23,9 @@ import androidx.compose.material.icons.outlined.Checklist
 import androidx.compose.material.icons.outlined.ConfirmationNumber
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.PersonRemove
+import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.material.icons.automirrored.outlined.Logout
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Map
 import androidx.compose.material.icons.outlined.MoreVert
@@ -92,6 +95,9 @@ fun TripDetailScreen(
     val bookings by remember(tripId) { Repo.bookings(tripId) }.collectAsStateWithLifecycle(initialValue = emptyList())
     var menuOpen by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
+    var confirmLeave by remember { mutableStateOf(false) }
+    var confirmNewCode by remember { mutableStateOf(false) }
+    var removing by remember { mutableStateOf<String?>(null) }
     var deleting by remember { mutableStateOf(false) }
     val snackbar = remember { SnackbarHostState() }
 
@@ -112,14 +118,25 @@ fun TripDetailScreen(
                 actions = {
                     if (trip != null) {
                         IconButton(onClick = onEdit) { Icon(Icons.Outlined.Edit, "Editar") }
-                        if (isOwner) {
-                            Box {
-                                IconButton(onClick = { menuOpen = true }) { Icon(Icons.Outlined.MoreVert, "Mais opções") }
-                                DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                        Box {
+                            IconButton(onClick = { menuOpen = true }) { Icon(Icons.Outlined.MoreVert, "Mais opções") }
+                            DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                                if (isOwner) {
+                                    DropdownMenuItem(
+                                        text = { Text("Gerar novo código de convite") },
+                                        leadingIcon = { Icon(Icons.Outlined.Refresh, null) },
+                                        onClick = { menuOpen = false; confirmNewCode = true },
+                                    )
                                     DropdownMenuItem(
                                         text = { Text("Apagar viagem") },
                                         leadingIcon = { Icon(Icons.Outlined.Delete, null) },
                                         onClick = { menuOpen = false; confirmDelete = true },
+                                    )
+                                } else {
+                                    DropdownMenuItem(
+                                        text = { Text("Sair da viagem") },
+                                        leadingIcon = { Icon(Icons.AutoMirrored.Outlined.Logout, null) },
+                                        onClick = { menuOpen = false; confirmLeave = true },
                                     )
                                 }
                             }
@@ -187,7 +204,7 @@ fun TripDetailScreen(
                     )
                 }
                 item { InviteCard(trip, snackbar) }
-                item { People(trip) }
+                item { People(trip, canRemove = isOwner, onRemove = { removing = it }) }
             }
         }
     }
@@ -206,6 +223,59 @@ fun TripDetailScreen(
                 }) { Text("Apagar", color = MaterialTheme.colorScheme.error) }
             },
             dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Cancelar") } },
+        )
+    }
+
+    if (confirmLeave && trip != null) {
+        AlertDialog(
+            onDismissRequest = { confirmLeave = false },
+            title = { Text("Sair de \"${trip.name}\"?") },
+            text = { Text("Você deixa de ver a viagem. Para voltar, alguém precisa te mandar o código de convite de novo.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmLeave = false
+                    Repo.leaveTrip(trip.id)
+                    onBack()
+                }) { Text("Sair", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = { TextButton(onClick = { confirmLeave = false }) { Text("Cancelar") } },
+        )
+    }
+
+    if (confirmNewCode && trip != null) {
+        AlertDialog(
+            onDismissRequest = { confirmNewCode = false },
+            title = { Text("Gerar novo código?") },
+            text = { Text("O código atual para de funcionar. Quem já está na viagem continua normalmente.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmNewCode = false
+                    Repo.newInviteCodeFor(trip)
+                }) { Text("Gerar") }
+            },
+            dismissButton = { TextButton(onClick = { confirmNewCode = false }) { Text("Cancelar") } },
+        )
+    }
+
+    removing?.let { memberId ->
+        val name = trip?.memberNames?.get(memberId) ?: "esta pessoa"
+        AlertDialog(
+            onDismissRequest = { removing = null },
+            title = { Text("Remover $name?") },
+            text = {
+                Text(
+                    "$name deixa de ver a viagem. Os gastos que envolvem essa pessoa continuam lançados, " +
+                        "mas ela sai das divisões \"entre todos\". Se ela tiver o código, consegue entrar de novo: " +
+                        "gere um código novo se quiser evitar isso."
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    trip?.let { Repo.removeMember(it.id, memberId) }
+                    removing = null
+                }) { Text("Remover", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = { TextButton(onClick = { removing = null }) { Text("Cancelar") } },
         )
     }
 }
@@ -309,7 +379,7 @@ private fun InviteCard(trip: Trip, snackbar: SnackbarHostState) {
 }
 
 @Composable
-private fun People(trip: Trip) {
+private fun People(trip: Trip, canRemove: Boolean, onRemove: (String) -> Unit) {
     Column {
         SectionTitle("Quem vai (${trip.members.size})", Modifier.padding(bottom = 8.dp))
         Card(
@@ -333,7 +403,7 @@ private fun People(trip: Trip) {
                             }
                         }
                         Spacer(Modifier.width(12.dp))
-                        Column {
+                        Column(Modifier.weight(1f)) {
                             Text(name, style = MaterialTheme.typography.bodyLarge)
                             if (memberId == trip.ownerId) {
                                 Text(
@@ -341,6 +411,11 @@ private fun People(trip: Trip) {
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
+                            }
+                        }
+                        if (canRemove && memberId != trip.ownerId) {
+                            IconButton(onClick = { onRemove(memberId) }) {
+                                Icon(Icons.Outlined.PersonRemove, "Remover $name", tint = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         }
                     }
