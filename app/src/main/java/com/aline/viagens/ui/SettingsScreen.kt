@@ -134,6 +134,8 @@ fun SettingsScreen(uid: String, prefs: UserPrefs, onBack: () -> Unit) {
                 )
             }
 
+            RemindersSetting()
+
             OutlinedButton(onClick = { confirmLogout = true }, modifier = Modifier.fillMaxWidth()) {
                 Icon(Icons.AutoMirrored.Outlined.Logout, null)
                 Spacer(Modifier.width(8.dp))
@@ -176,5 +178,46 @@ private fun PaletteSwatch(palette: Palette, selected: Boolean, modifier: Modifie
         }
         Spacer(Modifier.height(6.dp))
         Text(palette.label, style = MaterialTheme.typography.labelMedium, textAlign = TextAlign.Center)
+    }
+}
+
+@Composable
+private fun RemindersSetting() {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    var on by remember { mutableStateOf(com.aline.viagens.data.Reminders.enabled(context)) }
+    var allowed by remember { mutableStateOf(com.aline.viagens.data.Reminders.hasPermission(context)) }
+    val launcher = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
+    ) { granted -> allowed = granted }
+
+    Column {
+        SectionTitle("Lembretes", Modifier.padding(bottom = 8.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("Avisos das reservas", style = MaterialTheme.typography.bodyLarge)
+                Text(
+                    "Véspera e 3 horas antes das passagens, e no dia de check-in, retirada e ingressos.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            androidx.compose.material3.Switch(
+                checked = on && allowed,
+                onCheckedChange = { checked ->
+                    on = checked
+                    com.aline.viagens.data.Reminders.setEnabled(context, checked)
+                    if (checked && !allowed && android.os.Build.VERSION.SDK_INT >= 33) {
+                        launcher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                    }
+                },
+            )
+        }
+        if (on && !allowed) {
+            Text(
+                "O celular não deixou o app mostrar notificações. Ative em Configurações do Android → Apps → VamoViajar → Notificações.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
     }
 }

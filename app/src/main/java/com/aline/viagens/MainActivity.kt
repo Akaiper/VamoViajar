@@ -12,6 +12,7 @@ import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import com.aline.viagens.data.Reminders
 import com.aline.viagens.data.Repo
 import com.aline.viagens.data.UserPrefs
 import com.aline.viagens.ui.ActivityFormScreen
@@ -35,6 +36,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         Repo.init(applicationContext)
+        Reminders.start(applicationContext)
         enableEdgeToEdge()
         setContent { App() }
     }
@@ -46,6 +48,10 @@ private fun App() {
     val uid = user?.uid
     val prefs by remember(uid) { uid?.let { Repo.prefs(it) } ?: flowOf(Repo.cachedPrefs()) }
         .collectAsStateWithLifecycle(initialValue = Repo.cachedPrefs())
+
+    val context = androidx.compose.ui.platform.LocalContext.current
+    // Ao entrar na conta, recalcula lembretes e widget
+    androidx.compose.runtime.LaunchedEffect(uid) { if (uid != null) Reminders.syncNow(context) }
 
     VamoTheme(prefs) {
         if (uid == null) LoginScreen() else MainNav(uid, prefs)

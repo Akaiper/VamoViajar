@@ -76,6 +76,23 @@ fun TripsScreen(
     var latest by remember { mutableStateOf<Long?>(null) }
     var dismissedUpdate by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
     androidx.compose.runtime.LaunchedEffect(Unit) { latest = Updates.latestBuild() }
+    // Mantém o widget da tela inicial com a próxima viagem
+    androidx.compose.runtime.LaunchedEffect(trips) {
+        trips?.let { com.aline.viagens.widget.TripWidget.saveNextTrip(context, it) }
+    }
+    // Pede permissão de notificação uma vez (Android 13+), para os lembretes das reservas
+    val notifLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
+    ) { }
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        val prefs = context.getSharedPreferences("vamoviajar", android.content.Context.MODE_PRIVATE)
+        if (android.os.Build.VERSION.SDK_INT >= 33 && !com.aline.viagens.data.Reminders.hasPermission(context) &&
+            !prefs.getBoolean("askedNotif", false)
+        ) {
+            prefs.edit().putBoolean("askedNotif", true).apply()
+            notifLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
     val newBuild = latest?.takeIf { it > Updates.installedBuild(context) && !dismissedUpdate }
 
     Scaffold(

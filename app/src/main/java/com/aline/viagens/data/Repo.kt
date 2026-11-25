@@ -43,10 +43,12 @@ object Repo {
     private val auth: FirebaseAuth get() = FirebaseAuth.getInstance()
     private val db: FirebaseFirestore get() = FirebaseFirestore.getInstance()
     private lateinit var local: SharedPreferences
+    private lateinit var appContext: Context
     /** Para tarefas que devem terminar mesmo se a pessoa sair da tela. */
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     fun init(context: Context) {
+        appContext = context.applicationContext
         local = context.getSharedPreferences("vamoviajar", Context.MODE_PRIVATE)
         auth.setLanguageCode("pt") // e-mails de verificação e de senha em português
     }
@@ -107,7 +109,12 @@ object Repo {
         runAuth { auth.sendPasswordResetEmail(email.trim()).await() }
     }
 
-    fun signOut() = auth.signOut()
+    fun signOut() {
+        auth.signOut()
+        // Sem login, sem lembretes e sem viagem no widget
+        Reminders.schedule(appContext, emptyList())
+        com.aline.viagens.widget.TripWidget.saveNextTrip(appContext, emptyList())
+    }
 
     private suspend fun <T> runAuth(block: suspend () -> T): T = try {
         block()
@@ -416,10 +423,12 @@ object Repo {
         } else {
             bookingsRef(tripId).document(b.id).update(data).addOnFailureListener { Log.e(TAG, "Erro ao salvar reserva", it) }
         }
+        Reminders.syncNow(appContext)
     }
 
     fun deleteBooking(tripId: String, id: String) {
         bookingsRef(tripId).document(id).delete().addOnFailureListener { Log.e(TAG, "Erro ao apagar reserva", it) }
+        Reminders.syncNow(appContext)
     }
 
     // ---------- Gastos ----------
