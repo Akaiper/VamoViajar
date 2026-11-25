@@ -8,6 +8,8 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
@@ -28,9 +30,21 @@ jobs:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-        run: gradle assembleRelease --no-daemon --stacktrace
+        run: |
+          gradle assembleRelease --no-daemon --stacktrace
+          cp app/build/outputs/apk/release/app-release.apk VamoViajar.apk
 
       - uses: actions/upload-artifact@v4
         with:
           name: VamoViajar-apk
-          path: app/build/outputs/apk/release/*.apk
+          path: VamoViajar.apk
+
+      # Só publica para os amigos quando você roda manualmente (Run workflow)
+      - name: Publicar na página de Releases
+        if: github.event_name == 'workflow_dispatch'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v0.1.${{ github.run_number }}
+          name: VamoViajar 0.1.${{ github.run_number }}
+          files: VamoViajar.apk
+          make_latest: true
