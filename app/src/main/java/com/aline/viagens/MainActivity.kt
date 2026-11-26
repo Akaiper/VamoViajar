@@ -151,6 +151,7 @@ private fun MainNav(uid: String, prefs: UserPrefs) {
                 onAdd = { day -> nav.navigate("atividade/$id/novo/${day.ifBlank { "-" }}") },
                 onOpen = { actId -> nav.navigate("atividade/$id/$actId/-") },
                 onOpenBooking = { bId -> nav.navigate("reserva/$id/$bId/-") },
+                onNewExpense = { nav.navigate("gasto/$id/novo") },
             )
         }
         composable("atividade/{tripId}/{actId}/{day}") { entry ->

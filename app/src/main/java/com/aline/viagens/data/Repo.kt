@@ -191,13 +191,13 @@ object Repo {
     }
 
     /** Cria a viagem e o código de convite. Funciona offline: sincroniza quando a internet voltar. */
-    fun createTrip(name: String, destination: String, start: String, end: String): String {
+    fun createTrip(name: String, destination: String, start: String, end: String, car: CarInfo = CarInfo()): String {
         val user = auth.currentUser ?: throw UserMessageException("Faça login de novo.")
         val ref = db.collection("trips").document()
         val code = newInviteCode()
         db.batch()
             .set(
-                ref, mapOf(
+                ref, car.toMap() + mapOf(
                     "name" to name.trim(),
                     "destination" to destination.trim(),
                     "startDate" to start,
@@ -215,10 +215,10 @@ object Repo {
         return ref.id
     }
 
-    fun updateTrip(id: String, name: String, destination: String, start: String, end: String) {
+    fun updateTrip(id: String, name: String, destination: String, start: String, end: String, car: CarInfo) {
         db.collection("trips").document(id)
             .update(
-                mapOf(
+                car.toMap() + mapOf(
                     "name" to name.trim(),
                     "destination" to destination.trim(),
                     "startDate" to start,
@@ -345,6 +345,8 @@ object Repo {
             "notes" to a.notes.trim(),
             "category" to a.category,
             "bookingIds" to a.bookingIds,
+            "placeLat" to a.placeLat,
+            "placeLng" to a.placeLng,
             "updatedAt" to FieldValue.serverTimestamp(),
         )
         if (a.id.isBlank()) {
@@ -417,6 +419,9 @@ object Repo {
             "updatedAt" to FieldValue.serverTimestamp(),
         )
         data.putAll(b.split.toMap())
+        data["addressLat"] = b.addressLat; data["addressLng"] = b.addressLng
+        data["fromLat"] = b.fromLat; data["fromLng"] = b.fromLng
+        data["toLat"] = b.toLat; data["toLng"] = b.toLng
         if (b.id.isBlank()) {
             data["createdByName"] = displayName()
             bookingsRef(tripId).add(data).addOnFailureListener { Log.e(TAG, "Erro ao criar reserva", it) }

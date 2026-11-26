@@ -74,6 +74,7 @@ import com.aline.viagens.data.Balances
 import com.aline.viagens.data.Dates
 import com.aline.viagens.data.Days
 import com.aline.viagens.data.Expense
+import com.aline.viagens.data.ExpenseDraft
 import com.aline.viagens.data.Money
 import com.aline.viagens.data.Payment
 import com.aline.viagens.data.Repo
@@ -446,9 +447,11 @@ fun ExpenseFormScreen(tripId: String, expenseId: String?, uid: String, onDone: (
     }.collectAsStateWithLifecycle(initialValue = null)
     val trip = (tripState as? TripState.Found)?.trip
 
-    var title by rememberSaveable { mutableStateOf("") }
-    var amount by rememberSaveable { mutableStateOf("") }
-    var category by rememberSaveable { mutableStateOf("comida") }
+    // Rascunho vindo de outra tela (ex.: combustível estimado no roteiro), só para gasto novo
+    val draft = remember { if (expenseId == null) ExpenseDraft.take() else null }
+    var title by rememberSaveable { mutableStateOf(draft?.first ?: "") }
+    var amount by rememberSaveable { mutableStateOf(draft?.second?.let { Money.toField(it) } ?: "") }
+    var category by rememberSaveable { mutableStateOf(draft?.third ?: "comida") }
     var date by rememberSaveable { mutableStateOf(java.time.LocalDate.now().toString()) }
     var paidById by rememberSaveable { mutableStateOf(uid) }
     var splitMode by rememberSaveable { mutableStateOf("todos") }

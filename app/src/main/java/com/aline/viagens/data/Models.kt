@@ -12,7 +12,37 @@ data class Trip(
     val members: List<String>,
     val memberNames: Map<String, String>,
     val inviteCode: String,
+    val car: CarInfo = CarInfo(),
 )
+
+/** Dados do carro da viagem, para estimar distância e combustível. Tudo opcional. */
+data class CarInfo(
+    val destLat: Double? = null, val destLng: Double? = null,     // ponto exato do destino
+    val startPlace: String = "",                                   // ponto de partida (ex.: casa)
+    val startLat: Double? = null, val startLng: Double? = null,
+    val kmPerLiter: Double? = null,
+    val fuelPrice: Double? = null,                                 // R$ por litro
+    val roundTrip: Boolean = true,
+) {
+    val hasFuel get() = (kmPerLiter ?: 0.0) > 0 && (fuelPrice ?: 0.0) > 0
+    val hasLeg get() = destLat != null && destLng != null && startLat != null && startLng != null
+
+    fun toMap(): Map<String, Any?> = mapOf(
+        "destLat" to destLat, "destLng" to destLng,
+        "startPlace" to startPlace.trim(), "startLat" to startLat, "startLng" to startLng,
+        "kmPerLiter" to kmPerLiter, "fuelPrice" to fuelPrice, "roundTrip" to roundTrip,
+    )
+
+    companion object {
+        fun from(doc: DocumentSnapshot) = CarInfo(
+            destLat = doc.getDouble("destLat"), destLng = doc.getDouble("destLng"),
+            startPlace = doc.getString("startPlace").orEmpty(),
+            startLat = doc.getDouble("startLat"), startLng = doc.getDouble("startLng"),
+            kmPerLiter = doc.getDouble("kmPerLiter"), fuelPrice = doc.getDouble("fuelPrice"),
+            roundTrip = doc.getBoolean("roundTrip") ?: true,
+        )
+    }
+}
 
 data class UserPrefs(
     val palette: String = "oceano",
@@ -38,6 +68,7 @@ fun DocumentSnapshot.toTrip(): Trip? {
         members = (get("members") as? List<String>).orEmpty(),
         memberNames = (get("memberNames") as? Map<String, String>).orEmpty(),
         inviteCode = getString("inviteCode").orEmpty(),
+        car = CarInfo.from(this),
     )
 }
 
@@ -53,6 +84,8 @@ data class Activity(
     val order: Double? = null, // preenchido só quando o dia foi reordenado na mão
     val createdByName: String = "",
     val bookingIds: List<String> = emptyList(), // reservas ligadas a esta atividade
+    val placeLat: Double? = null, // preenchidos quando o local foi escolhido nas sugestões
+    val placeLng: Double? = null,
 )
 
 fun DocumentSnapshot.toActivity(): Activity? {
@@ -68,6 +101,8 @@ fun DocumentSnapshot.toActivity(): Activity? {
         order = getDouble("order"),
         createdByName = getString("createdByName").orEmpty(),
         bookingIds = (get("bookingIds") as? List<*>)?.filterIsInstance<String>().orEmpty(),
+        placeLat = getDouble("placeLat"),
+        placeLng = getDouble("placeLng"),
     )
 }
 
@@ -199,6 +234,10 @@ data class Booking(
     val notes: String = "",
     val createdByName: String = "",
     val split: Split = Split(), // como o valor é dividido nos gastos
+    // Coordenadas exatas, quando o local foi escolhido nas sugestões
+    val addressLat: Double? = null, val addressLng: Double? = null,
+    val fromLat: Double? = null, val fromLng: Double? = null,
+    val toLat: Double? = null, val toLng: Double? = null,
 ) {
     val bookingType get() = BookingType.from(type)
 
@@ -268,6 +307,9 @@ fun DocumentSnapshot.toBooking(): Booking? {
         notes = getString("notes").orEmpty(),
         createdByName = getString("createdByName").orEmpty(),
         split = Split.from(this),
+        addressLat = getDouble("addressLat"), addressLng = getDouble("addressLng"),
+        fromLat = getDouble("fromLat"), fromLng = getDouble("fromLng"),
+        toLat = getDouble("toLat"), toLng = getDouble("toLng"),
     )
 }
 

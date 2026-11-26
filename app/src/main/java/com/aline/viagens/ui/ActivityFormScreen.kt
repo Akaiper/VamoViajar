@@ -90,6 +90,8 @@ fun ActivityFormScreen(
     var originalDay by rememberSaveable { mutableStateOf(initialDay) }
     var time by rememberSaveable { mutableStateOf("") }
     var place by rememberSaveable { mutableStateOf("") }
+    var placeLat by rememberSaveable { mutableStateOf<Double?>(null) }
+    var placeLng by rememberSaveable { mutableStateOf<Double?>(null) }
     var notes by rememberSaveable { mutableStateOf("") }
     // Ids das reservas ligadas, separados por vírgula (fácil de guardar ao girar a tela)
     var linkedCsv by rememberSaveable { mutableStateOf("") }
@@ -105,6 +107,7 @@ fun ActivityFormScreen(
         if (editing && !loaded && a != null) {
             title = a.title; category = a.category; day = a.day; originalDay = a.day
             time = a.time; place = a.place; notes = a.notes
+            placeLat = a.placeLat; placeLng = a.placeLng
             linkedCsv = a.bookingIds.joinToString(",")
             loaded = true
         }
@@ -195,20 +198,13 @@ fun ActivityFormScreen(
             }
 
             Spacer(Modifier.height(16.dp))
-            OutlinedTextField(
-                value = place, onValueChange = { place = it },
-                label = { Text("Local (opcional)") },
-                placeholder = { Text("Nome, endereço ou link do Maps") },
-                supportingText = {
-                    Text("Para o lugar exato: no Google Maps, toque em Compartilhar → Copiar link e cole aqui.")
-                },
-                singleLine = true,
-                trailingIcon = {
-                    if (place.isNotBlank()) {
-                        IconButton(onClick = { openInMaps(context, place, trip?.destination.orEmpty()) }) { Icon(Icons.Outlined.Map, "Ver no mapa") }
-                    }
-                },
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
+            PlaceField(
+                value = place, lat = placeLat, lng = placeLng,
+                onChange = { text, la, ln -> place = text; placeLat = la; placeLng = ln },
+                label = "Local (opcional)",
+                destination = trip?.destination.orEmpty(),
+                placeholder = "Comece a digitar o nome ou endereço",
+                supporting = "Escolha uma sugestão, ou digite livre ou cole um link do Google Maps.",
                 modifier = Modifier.fillMaxWidth(),
             )
 
@@ -268,6 +264,8 @@ fun ActivityFormScreen(
                                 day = day,
                                 time = if (day.isBlank()) "" else time,
                                 place = place,
+                                placeLat = placeLat,
+                                placeLng = placeLng,
                                 notes = notes,
                                 category = category,
                                 bookingIds = linked,

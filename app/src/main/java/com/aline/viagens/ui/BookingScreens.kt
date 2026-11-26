@@ -357,6 +357,12 @@ fun BookingFormScreen(
     var paidById by rememberSaveable { mutableStateOf("") }
     var paidByName by rememberSaveable { mutableStateOf("") }
     var notes by rememberSaveable { mutableStateOf("") }
+    var addressLat by rememberSaveable { mutableStateOf<Double?>(null) }
+    var addressLng by rememberSaveable { mutableStateOf<Double?>(null) }
+    var fromLat by rememberSaveable { mutableStateOf<Double?>(null) }
+    var fromLng by rememberSaveable { mutableStateOf<Double?>(null) }
+    var toLat by rememberSaveable { mutableStateOf<Double?>(null) }
+    var toLng by rememberSaveable { mutableStateOf<Double?>(null) }
     var splitMode by rememberSaveable { mutableStateOf("todos") }
     var splitParts by rememberSaveable { mutableStateOf("") }
     var splitShares by rememberSaveable { mutableStateOf("") }
@@ -370,6 +376,8 @@ fun BookingFormScreen(
         if (editing && !loaded && b != null) {
             type = b.type; mode = b.mode; title = b.title; number = b.number; from = b.from; to = b.to
             address = b.address; startDate = b.startDate; startTime = b.startTime; endDate = b.endDate; endTime = b.endTime
+            addressLat = b.addressLat; addressLng = b.addressLng
+            fromLat = b.fromLat; fromLng = b.fromLng; toLat = b.toLat; toLng = b.toLng
             code = b.code; link = b.link; price = Money.toField(b.price); paidById = b.paidById; paidByName = b.paidByName
             notes = b.notes
             SplitState.from(b.split).let { splitMode = it.mode; splitParts = it.participants; splitShares = it.shares }
@@ -438,8 +446,10 @@ fun BookingFormScreen(
             when (t) {
                 BookingType.PASSAGEM -> {
                     Field(number, { number = it }, if (mode == "aviao") "Número do voo" else "Número ou linha", caps = KeyboardCapitalization.Characters)
-                    Field(from, { from = it }, "De (cidade, aeroporto ou rodoviária)")
-                    Field(to, { to = it }, "Para")
+                    PlaceField(from, fromLat, fromLng, { t, la, ln -> from = t; fromLat = la; fromLng = ln },
+                        "De (cidade, aeroporto ou rodoviária)", "", modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp))
+                    PlaceField(to, toLat, toLng, { t, la, ln -> to = t; toLat = la; toLng = ln },
+                        "Para", "", modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp))
                     Label("Saída")
                     DateTimeRow(startDate, startTime, { startDate = it }, { startTime = it }, defaultDate = tripStart, modifier = Modifier.fillMaxWidth())
                     Spacer(Modifier.height(12.dp))
@@ -447,7 +457,8 @@ fun BookingFormScreen(
                     DateTimeRow(endDate, endTime, { endDate = it }, { endTime = it }, defaultDate = startDate.ifBlank { tripStart }, modifier = Modifier.fillMaxWidth())
                 }
                 BookingType.HOSPEDAGEM -> {
-                    AddressField(address, { address = it }) { openInMaps(context, address, trip?.destination.orEmpty()) }
+                    PlaceField(address, addressLat, addressLng, { t, la, ln -> address = t; addressLat = la; addressLng = ln },
+                        "Endereço (opcional)", trip?.destination.orEmpty(), modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp))
                     Label("Check-in")
                     DateTimeRow(startDate, startTime, { startDate = it }, { startTime = it }, defaultDate = tripStart, modifier = Modifier.fillMaxWidth())
                     Spacer(Modifier.height(12.dp))
@@ -455,16 +466,19 @@ fun BookingFormScreen(
                     DateTimeRow(endDate, endTime, { endDate = it }, { endTime = it }, defaultDate = tripEnd, modifier = Modifier.fillMaxWidth())
                 }
                 BookingType.TRANSPORTE -> {
-                    Field(from, { from = it }, "Local de retirada")
+                    PlaceField(from, fromLat, fromLng, { t, la, ln -> from = t; fromLat = la; fromLng = ln },
+                        "Local de retirada", trip?.destination.orEmpty(), modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp))
                     Label("Retirada")
                     DateTimeRow(startDate, startTime, { startDate = it }, { startTime = it }, defaultDate = tripStart, modifier = Modifier.fillMaxWidth())
                     Spacer(Modifier.height(12.dp))
-                    Field(to, { to = it }, "Local de devolução")
+                    PlaceField(to, toLat, toLng, { t, la, ln -> to = t; toLat = la; toLng = ln },
+                        "Local de devolução", trip?.destination.orEmpty(), modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp))
                     Label("Devolução")
                     DateTimeRow(endDate, endTime, { endDate = it }, { endTime = it }, defaultDate = tripEnd, modifier = Modifier.fillMaxWidth())
                 }
                 BookingType.INGRESSO -> {
-                    AddressField(address, { address = it }) { openInMaps(context, address, trip?.destination.orEmpty()) }
+                    PlaceField(address, addressLat, addressLng, { t, la, ln -> address = t; addressLat = la; addressLng = ln },
+                        "Endereço (opcional)", trip?.destination.orEmpty(), modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp))
                     Label("Quando")
                     DateTimeRow(startDate, startTime, { startDate = it }, { startTime = it }, defaultDate = tripStart, modifier = Modifier.fillMaxWidth())
                 }
@@ -591,6 +605,12 @@ fun BookingFormScreen(
                                     code = code, link = link, price = parsed,
                                     paidById = paidById, paidByName = paidByName, notes = notes,
                                     split = SplitState(splitMode, splitParts, splitShares).toSplit(),
+                                    addressLat = if (t == BookingType.HOSPEDAGEM || t == BookingType.INGRESSO) addressLat else null,
+                                    addressLng = if (t == BookingType.HOSPEDAGEM || t == BookingType.INGRESSO) addressLng else null,
+                                    fromLat = if (t == BookingType.PASSAGEM || t == BookingType.TRANSPORTE) fromLat else null,
+                                    fromLng = if (t == BookingType.PASSAGEM || t == BookingType.TRANSPORTE) fromLng else null,
+                                    toLat = if (t == BookingType.PASSAGEM || t == BookingType.TRANSPORTE) toLat else null,
+                                    toLng = if (t == BookingType.PASSAGEM || t == BookingType.TRANSPORTE) toLng else null,
                                 ),
                             )
                             onDone()
@@ -647,20 +667,6 @@ private fun Field(
         label = { Text(label) },
         singleLine = true,
         keyboardOptions = KeyboardOptions(capitalization = caps, keyboardType = keyboard, imeAction = ImeAction.Next),
-        modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
-    )
-}
-
-@Composable
-private fun AddressField(value: String, onChange: (String) -> Unit, onMap: () -> Unit) {
-    OutlinedTextField(
-        value = value, onValueChange = onChange,
-        label = { Text("Endereço (opcional)") },
-        singleLine = true,
-        trailingIcon = {
-            if (value.isNotBlank()) IconButton(onClick = onMap) { Icon(Icons.Outlined.Map, "Ver no mapa") }
-        },
-        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
         modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
     )
 }

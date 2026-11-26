@@ -21,6 +21,8 @@ import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material.icons.outlined.DirectionsCar
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Directions
@@ -47,6 +49,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -62,6 +65,11 @@ import com.aline.viagens.data.Activity
 import com.aline.viagens.data.Booking
 import com.aline.viagens.data.BookingEvent
 import com.aline.viagens.data.Days
+import com.aline.viagens.data.CarInfo
+import com.aline.viagens.data.ExpenseDraft
+import com.aline.viagens.data.Leg
+import com.aline.viagens.data.Money
+import com.aline.viagens.data.Routing
 import com.aline.viagens.data.Dates
 import com.aline.viagens.data.Trip
 import com.aline.viagens.data.Repo
@@ -72,8 +80,19 @@ import com.aline.viagens.data.sortedForDay
  * Abre um local no Google Maps. Aceita nome, endereço ou link.
  * Junta o destino da viagem na busca, para o Maps procurar perto de lá e não perto de onde a pessoa está.
  */
-fun openInMaps(context: Context, place: String, destination: String = "") {
+fun openInMaps(context: Context, place: String, destination: String = "", lat: Double? = null, lng: Double? = null) {
     val p = place.trim()
+    if (lat != null && lng != null) {
+        // Local escolhido nas sugestões: abre direto no ponto exato, com o nome como etiqueta
+        val geo = Uri.parse("geo:$lat,$lng?q=$lat,$lng(" + Uri.encode(p.ifBlank { "Local" }) + ")")
+        try {
+            context.startActivity(Intent(Intent.ACTION_VIEW, geo))
+        } catch (e: ActivityNotFoundException) {
+            val web = Uri.parse("https://www.google.com/maps/search/?api=1&query=$lat,$lng")
+            runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, web)) }
+        }
+        return
+    }
     if (p.startsWith("http")) {
         runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(p))) }
         return
@@ -96,6 +115,7 @@ fun ItineraryScreen(
     onAdd: (day: String) -> Unit,
     onOpen: (activityId: String) -> Unit,
     onOpenBooking: (bookingId: String) -> Unit,
+    onNewExpense: () -> Unit,
 ) {
     val tripState by remember(tripId) { Repo.trip(tripId) }.collectAsStateWithLifecycle(initialValue = TripState.Loading)
     val activities by remember(tripId) { Repo.activities(tripId) }.collectAsStateWithLifecycle(initialValue = null)
@@ -157,10 +177,52 @@ fun ItineraryScreen(
         val ideas = byDay[""].orEmpty().sortedBy { it.title.lowercase() }
         val outside = list.filter { it.day.isNotBlank() && it.day !in dayIds }.sortedWith(compareBy({ it.day }, { it.time }))
 
+        // Distâncias de carro: ida/volta e a rota de cada dia (só atividades com local exato)
+        val car = trip.car
+        val dayPoints = days.associate { d ->
+            d.toString() to byDay[d.toString()].orEmpty().sortedForDay().mapNotNull { a ->
+                val la = a.placeLat
+                val ln = a.placeLng
+                if (la != null && ln != null) la to ln else null
+            }
+        }
+        val legKey = dayPoints.toString() + car.toString()
+        var dayLegs by remember { mutableStateOf<Map<String, Leg>>(emptyMap()) }
+        var outLeg by remember { mutableStateOf<Leg?>(null) }
+        var routing by remember { mutableStateOf(false) }
+        LaunchedEffect(legKey) {
+            routing = true
+            val sLa = car.startLat; val sLn = car.startLng; val dLa = car.destLat; val dLn = car.destLng
+            outLeg = if (sLa != null && sLn != null && dLa != null && dLn != null) Routing.route(listOf(sLa to sLn, dLa to dLn)) else null
+            val m = mutableMapOf<String, Leg>()
+            dayPoints.forEach { (id, pts) -> if (pts.size >= 2) Routing.route(pts)?.let { m[id] = it } }
+            dayLegs = m
+            routing = false
+        }
+        val showCar = car.kmPerLiter != null || car.fuelPrice != null || car.startPlace.isNotBlank()
+
         LazyColumn(
             contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = pad.calculateTopPadding() + 4.dp, bottom = 48.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
+            if (showCar) {
+                item(key = "car") {
+                    CarCard(
+                        car = car,
+                        destination = trip.destination,
+                        outLeg = outLeg,
+                        daysKm = dayLegs.values.sumOf { it.km },
+                        daysWithRoute = dayLegs.size,
+                        loading = routing,
+                        onLaunch = { title, cost ->
+                            ExpenseDraft.title = title
+                            ExpenseDraft.amount = Math.round(cost * 100) / 100.0
+                            ExpenseDraft.category = "transporte"
+                            onNewExpense()
+                        },
+                    )
+                }
+            }
             days.forEachIndexed { index, date ->
                 val dayId = date.toString()
                 val dayList = byDay[dayId].orEmpty().sortedForDay()
@@ -174,7 +236,10 @@ fun ItineraryScreen(
                     bookingsById = bookingsById,
                     onOpenBooking = onOpenBooking,
                     title = "Dia ${index + 1}",
-                    subtitle = Days.label(date),
+                    subtitle = Days.label(date) + (dayLegs[dayId]?.let { leg ->
+                        " · ≈ " + Routing.formatKm(leg.km) +
+                            (Routing.fuel(leg.km, car)?.let { " · " + Money.format(it.cost) } ?: "")
+                    } ?: ""),
                     activities = dayList,
                     reordering = reorderingDay == dayId,
                     manual = dayList.any { it.order != null },
@@ -385,7 +450,7 @@ private fun ActivityCard(
                 if (activity.place.isNotBlank() && reorderControls == null) {
                     Spacer(Modifier.height(6.dp))
                     AssistChip(
-                        onClick = { openInMaps(context, activity.place, destination) },
+                        onClick = { openInMaps(context, activity.place, destination, activity.placeLat, activity.placeLng) },
                         label = { Text(activity.place, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                         leadingIcon = { Icon(Icons.Outlined.Map, null, Modifier.size(18.dp)) },
                     )
@@ -438,15 +503,25 @@ private fun BookingEventRow(e: BookingEvent, onClick: () -> Unit) {
     }
 }
 
+/** Uma parada da rota: coordenadas exatas quando existem, senão o texto do local. */
+private data class Stop(val text: String, val exact: String?)
+
 /** Locais das atividades do dia, na ordem do roteiro (links do Maps não entram, porque não servem de parada). */
-private fun routePlaces(day: List<Activity>): List<String> =
-    day.map { it.place.trim() }.filter { it.isNotBlank() && !it.startsWith("http") }.distinct()
+private fun routePlaces(day: List<Activity>): List<Stop> =
+    day.filter { it.place.isNotBlank() && !it.place.trim().startsWith("http") }
+        .map { a ->
+            Stop(
+                a.place.trim(),
+                if (a.placeLat != null && a.placeLng != null) "${a.placeLat},${a.placeLng}" else null,
+            )
+        }
+        .distinctBy { it.exact ?: it.text }
 
 /** Abre o Google Maps com o trajeto passando pelos locais do dia. */
-private fun openRoute(context: Context, places: List<String>, destination: String) {
+private fun openRoute(context: Context, places: List<Stop>, destination: String) {
     fun withCity(p: String) =
         if (destination.isBlank() || p.contains(destination.trim(), ignoreCase = true)) p else "$p, ${destination.trim()}"
-    val stops = places.take(10).map { withCity(it) }
+    val stops = places.take(10).map { it.exact ?: withCity(it.text) }
     val url = StringBuilder("https://www.google.com/maps/dir/?api=1")
         .append("&origin=").append(Uri.encode(stops.first()))
         .append("&destination=").append(Uri.encode(stops.last()))
@@ -488,4 +563,94 @@ private fun itineraryText(trip: Trip, activities: List<Activity>, bookings: List
     }
     sb.append("\nFeito no VamoViajar")
     return sb.toString()
+}
+
+/** Cartão com a estimativa de distância e combustível da viagem de carro. */
+@Composable
+private fun CarCard(
+    car: CarInfo,
+    destination: String,
+    outLeg: Leg?,
+    daysKm: Double,
+    daysWithRoute: Int,
+    loading: Boolean,
+    onLaunch: (title: String, cost: Double) -> Unit,
+) {
+    val outKm = outLeg?.km
+    val backKm = if (car.roundTrip) outKm else null
+    val totalKm = (outKm ?: 0.0) + (backKm ?: 0.0) + daysKm
+    Card(
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLowest),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(Modifier.padding(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Outlined.DirectionsCar, null, tint = MaterialTheme.colorScheme.primary)
+                Spacer(Modifier.width(8.dp))
+                Text("Carro e combustível", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                if (loading) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+            }
+            Spacer(Modifier.height(8.dp))
+            val dest = destination.ifBlank { "destino" }
+            val from = car.startPlace.ifBlank { "partida" }
+            if (outKm != null) {
+                CarLine("Ida: $from → $dest", outKm, car) { onLaunch("Combustível: ida", it) }
+                if (backKm != null) CarLine("Volta: $dest → $from", backKm, car) { onLaunch("Combustível: volta", it) }
+            }
+            if (daysWithRoute > 0) {
+                CarLine(
+                    if (daysWithRoute == 1) "Passeios (1 dia com rota)" else "Passeios ($daysWithRoute dias com rota)",
+                    daysKm, car,
+                ) { onLaunch("Combustível: passeios", it) }
+            }
+            if (totalKm > 0) {
+                HorizontalDivider(Modifier.padding(vertical = 6.dp))
+                CarLine("Total da viagem", totalKm, car, bold = true) { onLaunch("Combustível: viagem toda", it) }
+            }
+
+            val hints = listOfNotNull(
+                "Para a ida e volta, escolha o ponto de partida e o destino nas sugestões, em Editar viagem."
+                    .takeIf { !car.hasLeg && car.startPlace.isNotBlank() },
+                "Informe o consumo e o preço do litro em Editar viagem para ver o custo."
+                    .takeIf { !car.hasFuel },
+                "A rota de cada dia usa as atividades com local exato (escolhido nas sugestões)."
+                    .takeIf { daysWithRoute == 0 },
+            )
+            hints.forEach {
+                Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "Estimativa pela estrada, sem trânsito nem pedágio. Rotas: OSRM · © OpenStreetMap",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun CarLine(label: String, km: Double, car: CarInfo, bold: Boolean = false, onLaunch: (Double) -> Unit) {
+    val fuel = Routing.fuel(km, car)
+    Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text(
+                label, style = MaterialTheme.typography.bodyMedium,
+                fontWeight = if (bold) FontWeight.SemiBold else null,
+                maxLines = 1, overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                listOfNotNull(Routing.formatKm(km), fuel?.let { Routing.formatLiters(it.liters) }).joinToString(" · "),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        if (fuel != null) {
+            Text(
+                Money.format(fuel.cost),
+                fontWeight = if (bold) FontWeight.SemiBold else FontWeight.Medium,
+            )
+            TextButton(onClick = { onLaunch(fuel.cost) }) { Text("Lançar") }
+        }
+    }
 }

@@ -42,6 +42,13 @@ import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aline.viagens.data.Dates
+import androidx.compose.foundation.layout.Row
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.Switch
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.text.input.KeyboardType
+import com.aline.viagens.data.CarInfo
+import com.aline.viagens.data.Money
 import com.aline.viagens.data.Repo
 import com.aline.viagens.data.TripState
 import kotlinx.coroutines.flow.flowOf
@@ -58,6 +65,15 @@ fun TripFormScreen(tripId: String?, onBack: () -> Unit, onSaved: (String) -> Uni
     var destination by rememberSaveable { mutableStateOf("") }
     var start by rememberSaveable { mutableStateOf("") }
     var end by rememberSaveable { mutableStateOf("") }
+    var destLat by rememberSaveable { mutableStateOf<Double?>(null) }
+    var destLng by rememberSaveable { mutableStateOf<Double?>(null) }
+    var startPlace by rememberSaveable { mutableStateOf("") }
+    var startLat by rememberSaveable { mutableStateOf<Double?>(null) }
+    var startLng by rememberSaveable { mutableStateOf<Double?>(null) }
+    var kmPerLiter by rememberSaveable { mutableStateOf("") }
+    var fuelPrice by rememberSaveable { mutableStateOf("") }
+    var roundTrip by rememberSaveable { mutableStateOf(true) }
+    var byCar by rememberSaveable { mutableStateOf(false) }
     var loaded by rememberSaveable { mutableStateOf(!editing) }
     var showPicker by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -67,6 +83,13 @@ fun TripFormScreen(tripId: String?, onBack: () -> Unit, onSaved: (String) -> Uni
         if (editing && !loaded && s is TripState.Found) {
             name = s.trip.name; destination = s.trip.destination
             start = s.trip.startDate; end = s.trip.endDate
+            val c = s.trip.car
+            destLat = c.destLat; destLng = c.destLng
+            startPlace = c.startPlace; startLat = c.startLat; startLng = c.startLng
+            kmPerLiter = c.kmPerLiter?.let { Money.toField(it) }.orEmpty()
+            fuelPrice = c.fuelPrice?.let { Money.toField(it) }.orEmpty()
+            roundTrip = c.roundTrip
+            byCar = c.kmPerLiter != null || c.fuelPrice != null || c.startPlace.isNotBlank()
             loaded = true
         }
     }
@@ -99,12 +122,12 @@ fun TripFormScreen(tripId: String?, onBack: () -> Unit, onSaved: (String) -> Uni
                 modifier = Modifier.fillMaxWidth(),
             )
             Spacer(Modifier.height(12.dp))
-            OutlinedTextField(
-                value = destination, onValueChange = { destination = it },
-                label = { Text("Destino") },
-                placeholder = { Text("Ex.: Florianópolis, SC") },
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words, imeAction = ImeAction.Done),
+            PlaceField(
+                value = destination, lat = destLat, lng = destLng,
+                onChange = { t, la, ln -> destination = t; destLat = la; destLng = ln },
+                label = "Destino",
+                destination = "",
+                placeholder = "Ex.: Florianópolis, SC",
                 modifier = Modifier.fillMaxWidth(),
             )
             Spacer(Modifier.height(16.dp))
@@ -124,6 +147,51 @@ fun TripFormScreen(tripId: String?, onBack: () -> Unit, onSaved: (String) -> Uni
                 )
             }
 
+            Spacer(Modifier.height(20.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Vão de carro?", style = MaterialTheme.typography.titleSmall)
+                    Text(
+                        "Para estimar a distância e o gasto com combustível.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Switch(checked = byCar, onCheckedChange = { byCar = it })
+            }
+            if (byCar) {
+                Spacer(Modifier.height(12.dp))
+                PlaceField(
+                    value = startPlace, lat = startLat, lng = startLng,
+                    onChange = { t, la, ln -> startPlace = t; startLat = la; startLng = ln },
+                    label = "Saindo de (opcional)",
+                    destination = "",
+                    placeholder = "Ex.: sua casa ou cidade",
+                    supporting = "Escolha uma sugestão para calcular a distância da ida.",
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(12.dp))
+                Row {
+                    OutlinedTextField(
+                        value = kmPerLiter, onValueChange = { v -> kmPerLiter = v.filter { it.isDigit() || it == ',' || it == '.' }; error = null },
+                        label = { Text("Consumo") }, suffix = { Text("km/l") }, placeholder = { Text("12") },
+                        singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        modifier = Modifier.weight(1f),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    OutlinedTextField(
+                        value = fuelPrice, onValueChange = { v -> fuelPrice = v.filter { it.isDigit() || it == ',' || it == '.' }; error = null },
+                        label = { Text("Preço do litro") }, prefix = { Text("R$ ") }, placeholder = { Text("6,00") },
+                        singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+                Row(Modifier.fillMaxWidth().padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(checked = roundTrip, onCheckedChange = { roundTrip = it })
+                    Text("Contar a volta também")
+                }
+            }
+
             error?.let {
                 Spacer(Modifier.height(12.dp))
                 Text(it, color = MaterialTheme.colorScheme.error)
@@ -132,14 +200,23 @@ fun TripFormScreen(tripId: String?, onBack: () -> Unit, onSaved: (String) -> Uni
             Spacer(Modifier.height(28.dp))
             Button(
                 onClick = {
+                    val kml = Money.parse(kmPerLiter)
+                    val price = Money.parse(fuelPrice)
+                    val car = if (byCar) CarInfo(
+                        destLat = destLat, destLng = destLng,
+                        startPlace = startPlace, startLat = startLat, startLng = startLng,
+                        kmPerLiter = kml, fuelPrice = price, roundTrip = roundTrip,
+                    ) else CarInfo(destLat = destLat, destLng = destLng)
                     when {
                         name.isBlank() -> error = "Dê um nome para a viagem."
                         start.isBlank() -> error = "Escolha as datas da viagem."
+                        byCar && kmPerLiter.isNotBlank() && (kml == null || kml <= 0) -> error = "Consumo inválido. Ex.: 12 ou 11,5"
+                        byCar && fuelPrice.isNotBlank() && (price == null || price <= 0) -> error = "Preço inválido. Ex.: 6,29"
                         editing -> {
-                            Repo.updateTrip(tripId!!, name, destination, start, end.ifBlank { start })
+                            Repo.updateTrip(tripId!!, name, destination, start, end.ifBlank { start }, car)
                             onSaved(tripId)
                         }
-                        else -> onSaved(Repo.createTrip(name, destination, start, end.ifBlank { start }))
+                        else -> onSaved(Repo.createTrip(name, destination, start, end.ifBlank { start }, car))
                     }
                 },
                 enabled = loaded,
