@@ -21,6 +21,10 @@ import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.ExpandMore
+import androidx.compose.material.icons.outlined.ExpandLess
+import androidx.compose.material.icons.outlined.UnfoldMore
+import androidx.compose.material.icons.outlined.UnfoldLess
 import com.aline.viagens.data.EndpointSource
 import com.aline.viagens.data.Endpoint
 import com.aline.viagens.data.DayEndsResolver
@@ -135,6 +139,16 @@ fun ItineraryScreen(
     val bookings by remember(tripId) { Repo.bookings(tripId) }.collectAsStateWithLifecycle(initialValue = emptyList())
     val dayPlans by remember(tripId) { Repo.dayPlans(tripId) }.collectAsStateWithLifecycle(initialValue = emptyMap())
     var editingEnd by remember { mutableStateOf<Pair<String, Boolean>?>(null) } // (dia, é o início?)
+    // Dias recolhidos: só neste celular, lembrado entre aberturas do app
+    var collapsed by remember(tripId) { mutableStateOf(Repo.collapsedDays(tripId)) }
+    fun setCollapsed(days: Set<String>) {
+        collapsed = days
+        Repo.setCollapsedDays(tripId, days)
+    }
+    // Links do Google Maps salvos como local viram o nome do lugar, sem precisar abrir e salvar
+    LaunchedEffect(activities, bookings, dayPlans) {
+        activities?.let { Repo.convertSavedLinks(tripId, it, bookings, dayPlans) }
+    }
     var reorderingDay by remember { mutableStateOf<String?>(null) }
     val context = LocalContext.current
 
@@ -164,6 +178,18 @@ fun ItineraryScreen(
                 actions = {
                     val t = trip
                     val acts = activities
+                    if (t != null) {
+                        val allDays = Days.of(t.startDate, t.endDate).map { it.toString() }.toSet()
+                        if (allDays.size > 1) {
+                            val allCollapsed = collapsed.containsAll(allDays)
+                            IconButton(onClick = { setCollapsed(if (allCollapsed) emptySet() else allDays) }) {
+                                Icon(
+                                    if (allCollapsed) Icons.Outlined.UnfoldMore else Icons.Outlined.UnfoldLess,
+                                    if (allCollapsed) "Abrir todos os dias" else "Recolher todos os dias",
+                                )
+                            }
+                        }
+                    }
                     if (t != null && acts != null) {
                         IconButton(onClick = {
                             val send = Intent(Intent.ACTION_SEND).apply {
@@ -271,6 +297,11 @@ fun ItineraryScreen(
                             (Routing.fuel(leg.km, car)?.let { " · " + Money.format(it.cost) } ?: "")
                     } ?: ""),
                     activities = dayList,
+                    collapsed = dayId in collapsed,
+                    onToggleCollapse = {
+                        setCollapsed(if (dayId in collapsed) collapsed - dayId else collapsed + dayId)
+                        if (reorderingDay == dayId) reorderingDay = null
+                    },
                     ends = ends[dayId] ?: DayEnds(null, null),
                     isFirst = index == 0,
                     isLast = index == days.lastIndex,
@@ -354,6 +385,8 @@ private fun LazyListScope.daySection(
     title: String,
     subtitle: String,
     activities: List<Activity>,
+    collapsed: Boolean,
+    onToggleCollapse: () -> Unit,
     ends: DayEnds,
     isFirst: Boolean,
     isLast: Boolean,
@@ -371,26 +404,57 @@ private fun LazyListScope.daySection(
         Column(Modifier.padding(top = 12.dp)) {
             SectionHeader(
                 title = title,
-                subtitle = subtitle + if (manual && !reordering) " · ordem personalizada" else "",
+                subtitle = subtitle + if (manual && !reordering && !collapsed) " · ordem personalizada" else "",
+                modifier = Modifier.clickable(onClick = onToggleCollapse),
                 actions = {
-                    if (activities.size >= 2) {
+                    if (!collapsed && activities.size >= 2) {
                         if (reordering) {
                             TextButton(onClick = onToggleReorder) { Text("Concluir") }
                         } else {
                             IconButton(onClick = onToggleReorder) { Icon(Icons.Outlined.SwapVert, "Reordenar") }
                         }
                     }
-                    if (!reordering && onRoute != null) {
+                    if (!collapsed && !reordering && onRoute != null) {
                         IconButton(onClick = onRoute) { Icon(Icons.Outlined.Directions, "Ver rota do dia no mapa") }
                     }
-                    if (!reordering) IconButton(onClick = onAdd) { Icon(Icons.Outlined.Add, "Adicionar atividade") }
+                    if (!collapsed && !reordering) IconButton(onClick = onAdd) { Icon(Icons.Outlined.Add, "Adicionar atividade") }
+                    IconButton(onClick = onToggleCollapse) {
+                        Icon(
+                            if (collapsed) Icons.Outlined.ExpandMore else Icons.Outlined.ExpandLess,
+                            if (collapsed) "Abrir o dia" else "Recolher o dia",
+                        )
+                    }
                 },
             )
+            if (collapsed) {
+                // Resumo do dia recolhido
+                val parts = listOfNotNull(
+                    when (activities.size) {
+                        0 -> null
+                        1 -> "1 atividade"
+                        else -> "${activities.size} atividades"
+                    },
+                    when (events.size) {
+                        0 -> null
+                        1 -> "1 reserva"
+                        else -> "${events.size} reservas"
+                    },
+                    ends.end?.let { "dorme em " + MapLinks.display(it.label) },
+                )
+                Text(
+                    parts.joinToString(" · ").ifBlank { "Nada planejado ainda" }.replaceFirstChar { it.uppercase() },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2, overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.clickable(onClick = onToggleCollapse).padding(top = 2.dp),
+                )
+            }
             if (reordering && manual) {
                 TextButton(onClick = onResetOrder) { Text("Voltar a ordenar por horário") }
             }
         }
     }
+    if (collapsed) return
     if (!reordering) {
         item(key = "start-$key") {
             DayEndRow(isStart = true, endpoint = ends.start, isFirstOrLast = isFirst) { onEditEnd(true) }

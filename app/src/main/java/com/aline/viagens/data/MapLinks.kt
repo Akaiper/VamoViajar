@@ -29,6 +29,17 @@ object MapLinks {
     private val textQuery = Regex("[?&](?:q|query)=([^&]+)")
     private val embeddedMapsUrl = Regex("https://www\\.google\\.[a-z.]+/maps/[^\"'\\s<>\\\\]+")
 
+    // Depois de " - ", o Google às vezes cola o endereço no nome: "Rodoviária X - R. Tal, 100"
+    private val addressAfterDash = Regex(
+        "\\s+[-–]\\s+(?:R\\.|Rua|Av\\.?|Avenida|Al\\.|Alameda|Rod\\.|Rodovia|Estr\\.|Estrada|Tv\\.|Travessa|" +
+            "Pç\\.|Praça|Largo|Lgo\\.|Via|Pça\\.|BR-|SP-|SC-|RS-|PR-|RJ-|MG-|\\d).*$",
+        RegexOption.IGNORE_CASE,
+    )
+
+    /** Só o nome do lugar, sem o endereço que às vezes vem junto. */
+    private fun cleanName(raw: String): String =
+        raw.substringBefore(",").replace(addressAfterDash, "").trim()
+
     /** Resolve o link em nome + coordenadas. Null se não conseguir. */
     suspend fun resolve(context: Context, link: String): PlaceSuggestion? {
         // O Android bloqueia conexões http:// sem "s"; o Google aceita o mesmo endereço por https://
@@ -50,7 +61,7 @@ object MapLinks {
             val byName = byAddress ?: Places.search(name, limit = 1).firstOrNull()
             val found = byName ?: return null
             return PlaceSuggestion(
-                name = name.substringBefore(",").trim().ifBlank { found.name },
+                name = cleanName(name).ifBlank { found.name },
                 detail = found.detail,
                 city = found.city,
                 lat = found.lat,
@@ -59,7 +70,7 @@ object MapLinks {
         }
         val (lat, lng) = coords
         val around = Places.reverse(lat, lng)
-        val finalName = name.substringBefore(",").trim().ifBlank { around?.name.orEmpty() }.ifBlank { "Local marcado" }
+        val finalName = cleanName(name).ifBlank { around?.name.orEmpty() }.ifBlank { "Local marcado" }
         return PlaceSuggestion(
             name = finalName,
             detail = around?.detail.orEmpty(),

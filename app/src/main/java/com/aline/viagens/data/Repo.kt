@@ -503,6 +503,69 @@ object Repo {
         paymentsRef(tripId).document(id).delete().addOnFailureListener { Log.e(TAG, "Erro ao apagar pagamento", it) }
     }
 
+    // ---------- Links do Google Maps salvos como local ----------
+
+    /** O que já tentamos converter nesta abertura do app (para não insistir num link que não deu). */
+    private val triedLinks = mutableSetOf<String>()
+
+    /**
+     * Troca links do Google Maps salvos como local pelo nome do lugar com o ponto exato, e salva.
+     * Roda fora da tela, então termina mesmo se a pessoa sair do roteiro.
+     */
+    fun convertSavedLinks(tripId: String, activities: List<Activity>, bookings: List<Booking>, plans: Map<String, DayPlan>) {
+        val jobs = mutableListOf<Pair<String, suspend () -> Any?>>()
+        activities.filter { MapLinks.isLink(it.place) && it.placeLat == null }.forEach { a ->
+            jobs += "a-${a.id}-${a.place}" to suspend {
+                MapLinks.resolve(appContext, a.place)?.let { p ->
+                    db.collection("trips").document(tripId).collection("activities").document(a.id)
+                        .update(mapOf("place" to p.label, "placeLat" to p.lat, "placeLng" to p.lng)).await()
+                }
+            }
+        }
+        bookings.forEach { b ->
+            listOf(
+                Triple("address", b.address, b.addressLat),
+                Triple("from", b.from, b.fromLat),
+                Triple("to", b.to, b.toLat),
+            ).filter { (_, text, lat) -> MapLinks.isLink(text) && lat == null }.forEach { (field, text, _) ->
+                jobs += "b-${b.id}-$field-$text" to suspend {
+                    MapLinks.resolve(appContext, text)?.let { p ->
+                        bookingsRef(tripId).document(b.id)
+                            .update(mapOf(field to p.label, "${field}Lat" to p.lat, "${field}Lng" to p.lng)).await()
+                    }
+                }
+            }
+        }
+        plans.values.forEach { d ->
+            if (MapLinks.isLink(d.startPlace) && d.startLat == null) jobs += "d-${d.date}-start-${d.startPlace}" to suspend {
+                MapLinks.resolve(appContext, d.startPlace)?.let { p -> setDayEnd(tripId, d.date, true, p.label, p.lat, p.lng) }
+            }
+            if (MapLinks.isLink(d.endPlace) && d.endLat == null) jobs += "d-${d.date}-end-${d.endPlace}" to suspend {
+                MapLinks.resolve(appContext, d.endPlace)?.let { p -> setDayEnd(tripId, d.date, false, p.label, p.lat, p.lng) }
+            }
+        }
+        val todo = synchronized(triedLinks) { jobs.filter { triedLinks.add(it.first) } }
+        if (todo.isEmpty()) return
+        appScope.launch {
+            todo.forEach { (_, job) ->
+                try {
+                    job()
+                } catch (e: Exception) {
+                    Log.w(TAG, "Não deu para converter um link do Maps", e)
+                }
+            }
+        }
+    }
+
+    // ---------- Dias recolhidos no roteiro (só neste celular) ----------
+
+    fun collapsedDays(tripId: String): Set<String> =
+        local.getStringSet("recolhidos-$tripId", emptySet()).orEmpty().toSet()
+
+    fun setCollapsedDays(tripId: String, days: Set<String>) {
+        local.edit().putStringSet("recolhidos-$tripId", days).apply()
+    }
+
     // ---------- Início e fim de cada dia ----------
 
     private fun daysRef(tripId: String) = db.collection("trips").document(tripId).collection("days")
