@@ -578,6 +578,14 @@ object Repo {
         awaitClose { reg.remove() }
     }
 
+    /** Título curto do dia, visível para todos da viagem. Texto vazio apaga. */
+    fun setDayTitle(tripId: String, date: String, title: String) {
+        val clean = title.trim().take(60)
+        val value: Any = if (clean.isBlank()) FieldValue.delete() else clean
+        daysRef(tripId).document(date).set(mapOf("title" to value), SetOptions.merge())
+            .addOnFailureListener { Log.e(TAG, "Erro ao salvar título do dia", it) }
+    }
+
     /** Salva onde o dia começa (start = true) ou termina. Texto vazio volta para o automático. */
     fun setDayEnd(tripId: String, date: String, start: Boolean, label: String, lat: Double?, lng: Double?) {
         val prefix = if (start) "start" else "end"

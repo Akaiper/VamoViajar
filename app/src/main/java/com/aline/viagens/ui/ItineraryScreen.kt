@@ -21,6 +21,9 @@ import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.ExpandLess
 import androidx.compose.material.icons.outlined.UnfoldMore
@@ -139,6 +142,7 @@ fun ItineraryScreen(
     val bookings by remember(tripId) { Repo.bookings(tripId) }.collectAsStateWithLifecycle(initialValue = emptyList())
     val dayPlans by remember(tripId) { Repo.dayPlans(tripId) }.collectAsStateWithLifecycle(initialValue = emptyMap())
     var editingEnd by remember { mutableStateOf<Pair<String, Boolean>?>(null) } // (dia, é o início?)
+    var editingTitle by remember { mutableStateOf<String?>(null) } // dia cujo título está sendo editado
     // Dias recolhidos: só neste celular, lembrado entre aberturas do app
     var collapsed by remember(tripId) { mutableStateOf(Repo.collapsedDays(tripId)) }
     fun setCollapsed(days: Set<String>) {
@@ -194,7 +198,7 @@ fun ItineraryScreen(
                         IconButton(onClick = {
                             val send = Intent(Intent.ACTION_SEND).apply {
                                 type = "text/plain"
-                                putExtra(Intent.EXTRA_TEXT, itineraryText(t, acts, bookings, DayEndsResolver.resolve(Days.of(t.startDate, t.endDate), dayPlans, bookings)))
+                                putExtra(Intent.EXTRA_TEXT, itineraryText(t, acts, bookings, DayEndsResolver.resolve(Days.of(t.startDate, t.endDate), dayPlans, bookings), dayPlans.mapValues { it.value.title }))
                             }
                             context.startActivity(Intent.createChooser(send, "Compartilhar roteiro"))
                         }) { Icon(Icons.Outlined.Share, "Compartilhar roteiro") }
@@ -291,7 +295,9 @@ fun ItineraryScreen(
                         .sortedBy { it.time.ifBlank { "99" } },
                     bookingsById = bookingsById,
                     onOpenBooking = onOpenBooking,
-                    title = "Dia ${index + 1}",
+                    title = "Dia ${index + 1}" + (dayPlans[dayId]?.title?.takeIf { it.isNotBlank() }?.let { " · $it" } ?: ""),
+                    hasTitle = !dayPlans[dayId]?.title.isNullOrBlank(),
+                    onEditTitle = { editingTitle = dayId },
                     subtitle = Days.label(date) + (dayLegs[dayId]?.let { leg ->
                         " · ≈ " + Routing.formatKm(leg.km) +
                             (Routing.fuel(leg.km, car)?.let { " · " + Money.format(it.cost) } ?: "")
@@ -357,6 +363,18 @@ fun ItineraryScreen(
         }
     }
 
+    editingTitle?.let { dayId ->
+        DayTitleDialog(
+            current = dayPlans[dayId]?.title.orEmpty(),
+            dayLabel = Dates.parse(dayId)?.let { Days.label(it) }.orEmpty(),
+            onDismiss = { editingTitle = null },
+            onSave = { t ->
+                Repo.setDayTitle(tripId, dayId, t)
+                editingTitle = null
+            },
+        )
+    }
+
     editingEnd?.let { (dayId, isStart) ->
         val t = trip
         val current = t?.let { tr ->
@@ -383,6 +401,8 @@ private fun LazyListScope.daySection(
     onOpenBooking: (String) -> Unit,
     bookingsById: Map<String, Booking>,
     title: String,
+    hasTitle: Boolean,
+    onEditTitle: () -> Unit,
     subtitle: String,
     activities: List<Activity>,
     collapsed: Boolean,
@@ -456,6 +476,22 @@ private fun LazyListScope.daySection(
     }
     if (collapsed) return
     if (!reordering) {
+        item(key = "title-$key") {
+            Row(
+                Modifier.fillMaxWidth().clickable(onClick = onEditTitle).padding(horizontal = 4.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Icons.Outlined.Edit, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    if (hasTitle) "Título do dia" else "Dar um título para o dia",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+    if (!reordering) {
         item(key = "start-$key") {
             DayEndRow(isStart = true, endpoint = ends.start, isFirstOrLast = isFirst) { onEditEnd(true) }
         }
@@ -509,7 +545,7 @@ private fun SectionHeader(
             Spacer(Modifier.width(8.dp))
         }
         Column(Modifier.weight(1f)) {
-            Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
             Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         actions()
@@ -664,7 +700,13 @@ private fun openRoute(context: Context, places: List<Stop>, destination: String)
 }
 
 /** O roteiro em texto, para mandar no WhatsApp. */
-private fun itineraryText(trip: Trip, activities: List<Activity>, bookings: List<Booking>, ends: Map<String, DayEnds>): String {
+private fun itineraryText(
+    trip: Trip,
+    activities: List<Activity>,
+    bookings: List<Booking>,
+    ends: Map<String, DayEnds>,
+    titles: Map<String, String>,
+): String {
     val sb = StringBuilder()
     sb.append("🧳 ").append(trip.name)
     if (trip.destination.isNotBlank()) sb.append(" — ").append(trip.destination)
@@ -676,8 +718,10 @@ private fun itineraryText(trip: Trip, activities: List<Activity>, bookings: List
         val dayActs = byDay[id].orEmpty().sortedForDay()
         val dayEvents = events[id].orEmpty().filter { e -> dayActs.none { e.booking.id in it.bookingIds } }
         val dayEnds = ends[id]
-        if (dayActs.isEmpty() && dayEvents.isEmpty() && dayEnds?.start == null && dayEnds?.end == null) return@forEachIndexed
-        sb.append("\n*Dia ").append(i + 1).append(" · ").append(Days.label(date)).append("*\n")
+        if (dayActs.isEmpty() && dayEvents.isEmpty() && dayEnds?.start == null && dayEnds?.end == null && titles[id].isNullOrBlank()) return@forEachIndexed
+        sb.append("\n*Dia ").append(i + 1).append(" · ").append(Days.label(date))
+        titles[id]?.takeIf { it.isNotBlank() }?.let { sb.append(" — ").append(it) }
+        sb.append("*\n")
         dayEnds?.start?.let { sb.append("☀️ Começa em ").append(MapLinks.display(it.label)).append("\n") }
         dayEvents.sortedBy { it.time.ifBlank { "99" } }.forEach { e ->
             sb.append("• ")
@@ -894,6 +938,38 @@ private fun DayEndDialog(
         dismissButton = {
             Row {
                 if (chosen) TextButton(onClick = { onSave("", null, null) }) { Text("Voltar ao automático") }
+                TextButton(onClick = onDismiss) { Text("Cancelar") }
+            }
+        },
+    )
+}
+
+@Composable
+private fun DayTitleDialog(current: String, dayLabel: String, onDismiss: () -> Unit, onSave: (String) -> Unit) {
+    var text by remember { mutableStateOf(current) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Título do dia") },
+        text = {
+            Column {
+                if (dayLabel.isNotBlank()) {
+                    Text(dayLabel, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(Modifier.height(8.dp))
+                }
+                OutlinedTextField(
+                    value = text, onValueChange = { text = it.take(60) },
+                    placeholder = { Text("Ex.: Serra Gaúcha, Dia de praia") },
+                    singleLine = true,
+                    supportingText = { Text("${text.length}/60 · aparece para todos da viagem") },
+                    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        },
+        confirmButton = { TextButton(onClick = { onSave(text) }) { Text("Salvar") } },
+        dismissButton = {
+            Row {
+                if (current.isNotBlank()) TextButton(onClick = { onSave("") }) { Text("Apagar") }
                 TextButton(onClick = onDismiss) { Text("Cancelar") }
             }
         },

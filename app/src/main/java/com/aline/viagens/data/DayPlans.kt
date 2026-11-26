@@ -9,6 +9,7 @@ data class DayPlan(
     val date: String,
     val startPlace: String = "", val startLat: Double? = null, val startLng: Double? = null,
     val endPlace: String = "", val endLat: Double? = null, val endLng: Double? = null,
+    val title: String = "", // título curto do dia, ex.: "Serra Gaúcha"
 )
 
 fun DocumentSnapshot.toDayPlan(): DayPlan? {
@@ -17,6 +18,7 @@ fun DocumentSnapshot.toDayPlan(): DayPlan? {
         date = id,
         startPlace = getString("startPlace").orEmpty(), startLat = getDouble("startLat"), startLng = getDouble("startLng"),
         endPlace = getString("endPlace").orEmpty(), endLat = getDouble("endLat"), endLng = getDouble("endLng"),
+        title = getString("title").orEmpty(),
     )
 }
 
