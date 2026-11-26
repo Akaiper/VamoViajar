@@ -1,5 +1,6 @@
 package com.aline.viagens.data
 
+import android.content.Context
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -29,8 +30,10 @@ object MapLinks {
     private val embeddedMapsUrl = Regex("https://www\\.google\\.[a-z.]+/maps/[^\"'\\s<>\\\\]+")
 
     /** Resolve o link em nome + coordenadas. Null se não conseguir. */
-    suspend fun resolve(link: String): PlaceSuggestion? {
-        val finalUrl = withContext(Dispatchers.IO) { follow(link.trim()) } ?: return null
+    suspend fun resolve(context: Context, link: String): PlaceSuggestion? {
+        // O Android bloqueia conexões http:// sem "s"; o Google aceita o mesmo endereço por https://
+        val secure = link.trim().replaceFirst(Regex("^http://", RegexOption.IGNORE_CASE), "https://")
+        val finalUrl = withContext(Dispatchers.IO) { follow(secure) } ?: return null
         val coords = pin.find(finalUrl)?.let { it.groupValues[1].toDouble() to it.groupValues[2].toDouble() }
             ?: query.find(finalUrl)?.let { it.groupValues[1].toDouble() to it.groupValues[2].toDouble() }
             ?: view.find(finalUrl)?.let { it.groupValues[1].toDouble() to it.groupValues[2].toDouble() }
@@ -40,8 +43,20 @@ object MapLinks {
             ?.replace('+', ' ')?.trim()
             .orEmpty()
 
-        // Sem ponto no link não dá para marcar o local exato
-        if (coords == null) return null
+        // Sem ponto no link: procura pelo nome/endereço em texto que veio nele
+        if (coords == null) {
+            if (name.isBlank()) return null
+            val byAddress = Places.searchAddress(context, name, "").firstOrNull()
+            val byName = byAddress ?: Places.search(name, limit = 1).firstOrNull()
+            val found = byName ?: return null
+            return PlaceSuggestion(
+                name = name.substringBefore(",").trim().ifBlank { found.name },
+                detail = found.detail,
+                city = found.city,
+                lat = found.lat,
+                lng = found.lng,
+            )
+        }
         val (lat, lng) = coords
         val around = Places.reverse(lat, lng)
         val finalName = name.substringBefore(",").trim().ifBlank { around?.name.orEmpty() }.ifBlank { "Local marcado" }
@@ -58,7 +73,10 @@ object MapLinks {
     private fun follow(start: String): String? {
         var current = start
         repeat(6) {
-            if (pin.containsMatchIn(current) || placeName.containsMatchIn(current)) return current
+            // Já chegou no endereço completo: com o ponto, com o nome do lugar, ou com a busca em texto (?q=)
+            if (pin.containsMatchIn(current) || placeName.containsMatchIn(current) ||
+                (current.contains("/maps") && textQuery.containsMatchIn(current) && !current.contains("goo.gl"))
+            ) return current
             val conn = try {
                 URL(current).openConnection() as HttpURLConnection
             } catch (e: Exception) {
@@ -73,6 +91,7 @@ object MapLinks {
                 if (code in 300..399) {
                     val loc = conn.getHeaderField("Location") ?: return current
                     current = URL(URL(current), loc).toString()
+                        .replaceFirst(Regex("^http://", RegexOption.IGNORE_CASE), "https://")
                 } else {
                     // Alguns links curtos devolvem uma página com o endereço completo dentro
                     if (code == 200) {

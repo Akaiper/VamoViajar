@@ -72,7 +72,7 @@ fun PlaceField(
         if (!isLink || exact) return@LaunchedEffect
         delay(300)
         loading = true
-        val place = MapLinks.resolve(value)
+        val place = MapLinks.resolve(context.applicationContext, value)
         loading = false
         if (place != null) {
             typedSincePick = false
