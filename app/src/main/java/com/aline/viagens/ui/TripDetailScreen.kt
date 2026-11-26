@@ -301,7 +301,7 @@ private fun Overview(trip: Trip) {
             )
             Spacer(Modifier.height(12.dp))
             if (trip.destination.isNotBlank()) {
-                OverviewLine(Icons.Outlined.Place, trip.destination)
+                OverviewLine(Icons.Outlined.Place, com.aline.viagens.data.MapLinks.display(trip.destination))
                 Spacer(Modifier.height(6.dp))
             }
             val nights = Dates.nights(trip.startDate, trip.endDate)

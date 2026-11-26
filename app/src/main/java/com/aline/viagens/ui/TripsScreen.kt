@@ -195,7 +195,7 @@ private fun TripCard(trip: Trip, uid: String, faded: Boolean = false, onClick: (
             }
             if (trip.destination.isNotBlank()) {
                 Spacer(Modifier.height(6.dp))
-                InfoLine(Icons.Outlined.Place, trip.destination)
+                InfoLine(Icons.Outlined.Place, com.aline.viagens.data.MapLinks.display(trip.destination))
             }
             Spacer(Modifier.height(4.dp))
             InfoLine(Icons.Outlined.CalendarMonth, Dates.range(trip.startDate, trip.endDate))

@@ -1,6 +1,14 @@
 package com.aline.viagens.data
 
+import android.content.Context
+import android.location.Address
+import android.location.Geocoder
+import android.os.Build
 import android.util.Log
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withTimeoutOrNull
+import java.util.Locale
+import kotlin.coroutines.resume
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
@@ -65,6 +73,77 @@ object Places {
         val found = search(destination, limit = 1).firstOrNull()?.let { it.lat to it.lng }
         destinationCache[key] = found
         return found
+    }
+
+    /**
+     * Endereços com número, pelo buscador do próprio Android (usa os serviços do Google no celular).
+     * O OpenStreetMap quase não tem numeração de casas no Brasil, então para "Rua X, 438" este é o melhor caminho.
+     */
+    suspend fun searchAddress(context: Context, query: String, destination: String): List<PlaceSuggestion> {
+        if (!Geocoder.isPresent()) return emptyList()
+        val q = query.trim()
+        if (q.length < 5) return emptyList()
+        val dest = destination.trim()
+        // Junta a cidade do destino quando a pessoa não escreveu cidade, para não cair em outra "Rua ABC"
+        val full = if (dest.isNotBlank() && !q.contains(",") && !q.contains(dest, ignoreCase = true)) "$q, $dest" else q
+        val geocoder = Geocoder(context, Locale("pt", "BR"))
+        val found: List<Address> = try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                withTimeoutOrNull(6000) {
+                    suspendCancellableCoroutine<List<Address>> { cont ->
+                        geocoder.getFromLocationName(full, 4, object : Geocoder.GeocodeListener {
+                            override fun onGeocode(addresses: MutableList<Address>) {
+                                if (cont.isActive) cont.resume(addresses.toList())
+                            }
+
+                            override fun onError(errorMessage: String?) {
+                                if (cont.isActive) cont.resume(emptyList())
+                            }
+                        })
+                    }
+                } ?: emptyList()
+            } else {
+                withContext(Dispatchers.IO) {
+                    @Suppress("DEPRECATION")
+                    geocoder.getFromLocationName(full, 4).orEmpty()
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Buscador de endereços do Android indisponível", e)
+            emptyList()
+        }
+        return found.filter { it.hasLatitude() && it.hasLongitude() }.map { a ->
+            val street = listOfNotNull(a.thoroughfare, a.subThoroughfare).filter { it.isNotBlank() }.joinToString(", ")
+            val city = a.locality ?: a.subAdminArea ?: ""
+            val name = street.ifBlank { a.getAddressLine(0)?.substringBefore(" - ")?.substringBefore(",").orEmpty() }
+                .ifBlank { a.featureName.orEmpty() }
+            val detail = listOfNotNull(a.subLocality, city.ifBlank { null }, a.adminArea, a.countryName)
+                .filter { it.isNotBlank() }.distinct().joinToString(", ")
+            PlaceSuggestion(name.ifBlank { q }, detail, city, a.latitude, a.longitude)
+        }
+    }
+
+    /** Endereço com número? Aí vale perguntar também ao buscador do Android. */
+    fun looksLikeAddress(query: String): Boolean = query.any { it.isDigit() } && query.trim().length >= 5
+
+    /** O que fica num ponto (lat, lng): nome, rua e cidade. Null se não achar. */
+    suspend fun reverse(lat: Double, lng: Double): PlaceSuggestion? = withContext(Dispatchers.IO) {
+        try {
+            val url = "https://photon.komoot.io/reverse?lat=$lat&lon=$lng&limit=1"
+            val conn = URL(url).openConnection() as HttpURLConnection
+            conn.connectTimeout = 5000
+            conn.readTimeout = 5000
+            conn.setRequestProperty("User-Agent", "VamoViajar/1.0 (app pessoal de viagens)")
+            try {
+                if (conn.responseCode != 200) return@withContext null
+                parse(conn.inputStream.bufferedReader().use { it.readText() }).firstOrNull()
+            } finally {
+                conn.disconnect()
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Sem endereço para o ponto", e)
+            null
+        }
     }
 
     private fun parse(body: String): List<PlaceSuggestion> {

@@ -35,6 +35,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.aline.viagens.data.MapLinks
 import com.aline.viagens.data.PlaceSuggestion
 import com.aline.viagens.data.Places
 import kotlinx.coroutines.delay
@@ -61,7 +62,25 @@ fun PlaceField(
     var typedSincePick by remember { mutableStateOf(false) }
     var suggestions by remember { mutableStateOf<List<PlaceSuggestion>>(emptyList()) }
     var loading by remember { mutableStateOf(false) }
+    var linkFailed by remember { mutableStateOf(false) }
     val exact = lat != null && lng != null
+    val isLink = MapLinks.isLink(value)
+
+    // Link do Google Maps (colado agora ou salvo antes): troca pelo nome do lugar com o ponto exato
+    LaunchedEffect(value) {
+        linkFailed = false
+        if (!isLink || exact) return@LaunchedEffect
+        delay(300)
+        loading = true
+        val place = MapLinks.resolve(value)
+        loading = false
+        if (place != null) {
+            typedSincePick = false
+            onChange(place.label, place.lat, place.lng)
+        } else {
+            linkFailed = true
+        }
+    }
 
     // Busca depois de uma pausa na digitação, para não chamar o servidor a cada letra
     LaunchedEffect(value, focused, typedSincePick) {
@@ -72,7 +91,12 @@ fun PlaceField(
         delay(450)
         loading = true
         val near = Places.destinationPoint(destination)
-        suggestions = Places.search(value, near)
+        val names = Places.search(value, near)
+        // Com número na busca, o buscador do Android acha a casa certa; esses vêm primeiro
+        val addresses = if (Places.looksLikeAddress(value)) Places.searchAddress(context.applicationContext, value, destination) else emptyList()
+        suggestions = (addresses.take(3) + names).distinctBy { s ->
+            String.format(java.util.Locale.US, "%.4f,%.4f", s.lat, s.lng) + "|" + s.name.lowercase()
+        }.take(7)
         loading = false
     }
 
@@ -87,6 +111,8 @@ fun PlaceField(
             placeholder = placeholder?.let { { Text(it) } },
             supportingText = when {
                 exact -> ({ Text("Local exato no mapa") })
+                isLink && loading -> ({ Text("Lendo o link do Google Maps…") })
+                isLink && linkFailed -> ({ Text("Não consegui ler o endereço deste link, mas ele continua abrindo no Maps.") })
                 supporting != null -> ({ Text(supporting) })
                 else -> null
             },

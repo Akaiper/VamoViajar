@@ -241,15 +241,19 @@ data class Booking(
 ) {
     val bookingType get() = BookingType.from(type)
 
+    // Locais para mostrar: link do Maps aparece como "Local no Google Maps", não como o endereço cru
+    private val fromShown get() = MapLinks.display(from)
+    private val toShown get() = MapLinks.display(to)
+
     /** Uma linha curta que descreve a reserva. */
     fun summary(): String = when (bookingType) {
         BookingType.PASSAGEM -> listOf(
             TravelMode.from(mode).label,
             number,
-            listOf(from, to).filter { it.isNotBlank() }.joinToString(" → "),
+            listOf(fromShown, toShown).filter { it.isNotBlank() }.joinToString(" → "),
         ).filter { it.isNotBlank() }.joinToString(" · ")
-        BookingType.HOSPEDAGEM, BookingType.INGRESSO -> address
-        BookingType.TRANSPORTE -> listOf(from, to).filter { it.isNotBlank() }.distinct().joinToString(" → ")
+        BookingType.HOSPEDAGEM, BookingType.INGRESSO -> MapLinks.display(address)
+        BookingType.TRANSPORTE -> listOf(fromShown, toShown).filter { it.isNotBlank() }.distinct().joinToString(" → ")
     }
 
     /** Os momentos desta reserva que aparecem no roteiro. */
@@ -261,11 +265,11 @@ data class Booking(
         }
         when (bookingType) {
             BookingType.PASSAGEM -> {
-                val route = listOf(from, to).filter { it.isNotBlank() }.joinToString(" → ")
+                val route = listOf(fromShown, toShown).filter { it.isNotBlank() }.joinToString(" → ")
                 val base = listOf(name, number).filter { it.isNotBlank() }.joinToString(" ")
                 add(startDate, startTime, "Saída: $base" + if (route.isNotBlank()) " ($route)" else "")
                 if (endDate.isNotBlank() && (endDate != startDate || endTime.isNotBlank())) {
-                    add(endDate, endTime, "Chegada: $base" + if (to.isNotBlank()) " em $to" else "")
+                    add(endDate, endTime, "Chegada: $base" + if (to.isNotBlank()) " em $toShown" else "")
                 }
             }
             BookingType.HOSPEDAGEM -> {
@@ -273,8 +277,8 @@ data class Booking(
                 add(endDate, endTime, "Check-out: $name")
             }
             BookingType.TRANSPORTE -> {
-                add(startDate, startTime, "Retirada: $name" + if (from.isNotBlank()) " em $from" else "")
-                add(endDate, endTime, "Devolução: $name" + if (to.isNotBlank()) " em $to" else "")
+                add(startDate, startTime, "Retirada: $name" + if (from.isNotBlank()) " em $fromShown" else "")
+                add(endDate, endTime, "Devolução: $name" + if (to.isNotBlank()) " em $toShown" else "")
             }
             BookingType.INGRESSO -> add(startDate, startTime, name)
         }

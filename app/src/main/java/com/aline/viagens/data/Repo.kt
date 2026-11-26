@@ -239,6 +239,7 @@ object Repo {
                 refs += tripRef.collection("bookings").get().await().documents.map { it.reference }
                 refs += tripRef.collection("expenses").get().await().documents.map { it.reference }
                 refs += tripRef.collection("payments").get().await().documents.map { it.reference }
+                refs += tripRef.collection("days").get().await().documents.map { it.reference }
                 val lists = tripRef.collection("checklists").whereEqualTo("personal", false).get().await().documents +
                     tripRef.collection("checklists").whereEqualTo("ownerId", uid).get().await().documents
                 lists.distinctBy { it.id }.forEach { list ->
@@ -500,6 +501,30 @@ object Repo {
 
     fun deletePayment(tripId: String, id: String) {
         paymentsRef(tripId).document(id).delete().addOnFailureListener { Log.e(TAG, "Erro ao apagar pagamento", it) }
+    }
+
+    // ---------- Início e fim de cada dia ----------
+
+    private fun daysRef(tripId: String) = db.collection("trips").document(tripId).collection("days")
+
+    fun dayPlans(tripId: String): Flow<Map<String, DayPlan>> = callbackFlow {
+        val reg = daysRef(tripId).addSnapshotListener { snap, err ->
+            if (err != null) Log.e(TAG, "Erro ao ler início/fim dos dias", err)
+            if (snap != null) trySend(snap.documents.mapNotNull { it.toDayPlan() }.associateBy { it.date })
+        }
+        awaitClose { reg.remove() }
+    }
+
+    /** Salva onde o dia começa (start = true) ou termina. Texto vazio volta para o automático. */
+    fun setDayEnd(tripId: String, date: String, start: Boolean, label: String, lat: Double?, lng: Double?) {
+        val prefix = if (start) "start" else "end"
+        val data = if (label.isBlank()) {
+            mapOf("${prefix}Place" to FieldValue.delete(), "${prefix}Lat" to FieldValue.delete(), "${prefix}Lng" to FieldValue.delete())
+        } else {
+            mapOf("${prefix}Place" to label.trim(), "${prefix}Lat" to lat, "${prefix}Lng" to lng)
+        }
+        daysRef(tripId).document(date).set(data, SetOptions.merge())
+            .addOnFailureListener { Log.e(TAG, "Erro ao salvar início/fim do dia", it) }
     }
 
     // ---------- Checklist ----------
